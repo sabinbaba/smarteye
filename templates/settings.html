@@ -1,0 +1,2345 @@
+{% extends "base.html" %}
+
+{% block pagetitle %}Settings{% endblock %}
+{% block title %}System Configuration{% endblock %}
+{% block subtitle %}Configure IDS settings and preferences{% endblock %}
+
+{% block content %}
+<div class="settings-container">
+    <!-- Settings Header -->
+    <div class="settings-header">
+        <div class="header-content">
+            <h2><i class="fas fa-sliders-h"></i> System Configuration</h2>
+            <p>Configure intrusion detection settings, network preferences, and system behavior</p>
+        </div>
+        <div class="header-actions">
+            <button class="btn btn-secondary" id="save-settings">
+                <i class="fas fa-save"></i> Save Settings
+            </button>
+            <button class="btn btn-outline" id="reset-settings">
+                <i class="fas fa-undo"></i> Reset to Defaults
+            </button>
+            <button class="btn btn-primary" id="export-config">
+                <i class="fas fa-download"></i> Export Config
+            </button>
+        </div>
+    </div>
+
+    <!-- Settings Navigation -->
+    <div class="settings-nav">
+        <div class="nav-tabs">
+            <button class="nav-tab active" data-tab="general">
+                <i class="fas fa-cog"></i> General
+            </button>
+            <button class="nav-tab" data-tab="network">
+                <i class="fas fa-network-wired"></i> Network
+            </button>
+            <button class="nav-tab" data-tab="detection">
+                <i class="fas fa-shield-alt"></i> Detection
+            </button>
+            <button class="nav-tab" data-tab="ml">
+                <i class="fas fa-robot"></i> Machine Learning
+            </button>
+            <button class="nav-tab" data-tab="notifications">
+                <i class="fas fa-bell"></i> Notifications
+            </button>
+            <button class="nav-tab" data-tab="interface">
+                <i class="fas fa-desktop"></i> Interface
+            </button>
+            <button class="nav-tab" data-tab="security">
+                <i class="fas fa-lock"></i> Security
+            </button>
+        </div>
+    </div>
+
+    <!-- Settings Content -->
+    <div class="settings-content">
+        <!-- General Settings -->
+        <div class="settings-section active" id="general-settings">
+            <div class="section-header">
+                <h3><i class="fas fa-cog"></i> General Settings</h3>
+                <p>Basic system configuration and preferences</p>
+            </div>
+            
+            <div class="settings-grid">
+                <div class="setting-card">
+                    <div class="setting-header">
+                        <h4><i class="fas fa-play-circle"></i> System Startup</h4>
+                    </div>
+                    <div class="setting-body">
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="auto-start" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Auto-start on boot</strong>
+                                <small>Start IDS automatically when system boots</small>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="auto-update" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Automatic updates</strong>
+                                <small>Check for and install updates automatically</small>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>System Log Level</label>
+                            <select id="log-level">
+                                <option value="debug">Debug</option>
+                                <option value="info" selected>Info</option>
+                                <option value="warning">Warning</option>
+                                <option value="error">Error</option>
+                                <option value="critical">Critical</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="setting-card">
+                    <div class="setting-header">
+                        <h4><i class="fas fa-database"></i> Data Management</h4>
+                    </div>
+                    <div class="setting-body">
+                        <div class="form-group">
+                            <label>Packet Buffer Size</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="packet-buffer" value="500" min="100" max="10000">
+                                <span class="unit">packets</span>
+                            </div>
+                            <small>Maximum number of packets to keep in memory</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Log Retention</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="log-retention" value="30" min="1" max="365">
+                                <span class="unit">days</span>
+                            </div>
+                            <small>How long to keep log files before deletion</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="compress-logs" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Compress logs</strong>
+                                <small>Compress old log files to save disk space</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="setting-card">
+                    <div class="setting-header">
+                        <h4><i class="fas fa-clock"></i> Performance</h4>
+                    </div>
+                    <div class="setting-body">
+                        <div class="form-group">
+                            <label>Update Interval</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="update-interval" value="2" min="1" max="60">
+                                <span class="unit">seconds</span>
+                            </div>
+                            <small>Dashboard update frequency</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>CPU Usage Limit</label>
+                            <div class="range-input">
+                                <input type="range" id="cpu-limit" min="10" max="90" value="60">
+                                <div class="range-value">
+                                    <span id="cpu-value">60</span>%
+                                </div>
+                            </div>
+                            <small>Maximum CPU usage before throttling</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="performance-mode" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Performance mode</strong>
+                                <small>Optimize for speed over resource usage</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Network Settings -->
+        <div class="settings-section" id="network-settings">
+            <div class="section-header">
+                <h3><i class="fas fa-network-wired"></i> Network Settings</h3>
+                <p>Configure network interfaces and capture settings</p>
+            </div>
+            
+            <div class="settings-grid">
+                <div class="setting-card">
+                    <div class="setting-header">
+                        <h4><i class="fas fa-wifi"></i> Network Interface</h4>
+                    </div>
+                    <div class="setting-body">
+                        <div class="form-group">
+                            <label>Primary Interface</label>
+                            <select id="network-interface">
+                                <option value="eth0">eth0 (Ethernet)</option>
+                                <option value="wlan0" selected>wlan0 (Wireless)</option>
+                                <option value="enp3s0">enp3s0 (Ethernet)</option>
+                                <option value="any">any (All Interfaces)</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Promiscuous Mode</label>
+                            <div class="radio-group">
+                                <label class="radio">
+                                    <input type="radio" name="promiscuous" value="true" checked>
+                                    <span class="radio-checkmark"></span>
+                                    Enable
+                                </label>
+                                <label class="radio">
+                                    <input type="radio" name="promiscuous" value="false">
+                                    <span class="radio-checkmark"></span>
+                                    Disable
+                                </label>
+                            </div>
+                            <small>Capture all packets on the network</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Capture Filter</label>
+                            <input type="text" id="capture-filter" placeholder="e.g., tcp port 80 or udp">
+                            <small>BPF filter expression (leave empty for all traffic)</small>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="setting-card">
+                    <div class="setting-header">
+                        <h4><i class="fas fa-traffic-light"></i> Traffic Analysis</h4>
+                    </div>
+                    <div class="setting-body">
+                        <div class="form-group">
+                            <label>Packet Capture Timeout</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="capture-timeout" value="0" min="0" max="300">
+                                <span class="unit">seconds</span>
+                            </div>
+                            <small>0 = continuous capture</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Maximum Packet Size</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="max-packet-size" value="65535" min="68" max="65535">
+                                <span class="unit">bytes</span>
+                            </div>
+                            <small>Maximum size of packets to capture</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="capture-dns" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Capture DNS traffic</strong>
+                                <small>Include DNS queries/responses in capture</small>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="ignore-local" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Ignore local traffic</strong>
+                                <small>Ignore traffic between local network hosts</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="setting-card">
+                    <div class="setting-header">
+                        <h4><i class="fas fa-chart-network"></i> Network Monitoring</h4>
+                    </div>
+                    <div class="setting-body">
+                        <div class="form-group">
+                            <label>Monitor Ports</label>
+                            <textarea id="monitor-ports" rows="3" placeholder="e.g., 22, 80, 443, 3389"></textarea>
+                            <small>Comma-separated list of ports to monitor</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Whitelist IPs</label>
+                            <textarea id="whitelist-ips" rows="3" placeholder="e.g., 192.168.1.1, 10.0.0.0/24"></textarea>
+                            <small>IP addresses or ranges to exclude from monitoring</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Blacklist IPs</label>
+                            <textarea id="blacklist-ips" rows="3" placeholder="e.g., 203.0.113.0/24"></textarea>
+                            <small>IP addresses or ranges to block automatically</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Detection Settings -->
+        <div class="settings-section" id="detection-settings">
+            <div class="section-header">
+                <h3><i class="fas fa-shield-alt"></i> Detection Settings</h3>
+                <p>Configure attack detection rules and thresholds</p>
+            </div>
+            
+            <div class="settings-grid">
+                <div class="setting-card">
+                    <div class="setting-header">
+                        <h4><i class="fas fa-bolt"></i> DoS/DDoS Detection</h4>
+                    </div>
+                    <div class="setting-body">
+                        <div class="form-group">
+                            <label>DoS Threshold</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="dos-threshold" value="500" min="10" max="10000">
+                                <span class="unit">packets/sec</span>
+                            </div>
+                            <small>Packets per second from single source</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>DDoS Source Threshold</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="ddos-source-threshold" value="5" min="2" max="100">
+                                <span class="unit">sources</span>
+                            </div>
+                            <small>Minimum sources for DDoS detection</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>DDoS Total Threshold</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="ddos-total-threshold" value="1500" min="100" max="100000">
+                                <span class="unit">packets/sec</span>
+                            </div>
+                            <small>Total packets/sec for DDoS detection</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="enable-dos-detection" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Enable DoS detection</strong>
+                                <small>Detect Denial of Service attacks</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="setting-card">
+                    <div class="setting-header">
+                        <h4><i class="fas fa-search"></i> Port Scan Detection</h4>
+                    </div>
+                    <div class="setting-body">
+                        <div class="form-group">
+                            <label>TCP Scan Threshold</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="tcp-scan-threshold" value="20" min="5" max="1000">
+                                <span class="unit">ports</span>
+                            </div>
+                            <small>Different ports from single source</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>UDP Scan Threshold</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="udp-scan-threshold" value="15" min="5" max="1000">
+                                <span class="unit">ports</span>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>ICMP Scan Threshold</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="icmp-scan-threshold" value="5" min="2" max="100">
+                                <span class="unit">targets</span>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="enable-port-scan-detection" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Enable port scan detection</strong>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="setting-card">
+                    <div class="setting-header">
+                        <h4><i class="fas fa-exclamation-triangle"></i> Advanced Detection</h4>
+                    </div>
+                    <div class="setting-body">
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="detect-slowloris">
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Detect Slowloris attacks</strong>
+                                <small>Detect slow HTTP DoS attacks</small>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="detect-land-attack" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Detect LAND attacks</strong>
+                                <small>Detect source = destination attacks</small>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="detect-smurf" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Detect Smurf attacks</strong>
+                                <small>Detect ICMP amplification attacks</small>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="detect-xmas-scan">
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Detect XMAS scans</strong>
+                                <small>Detect TCP XMAS port scans</small>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Detection Sensitivity</label>
+                            <div class="range-input">
+                                <input type="range" id="detection-sensitivity" min="1" max="10" value="7">
+                                <div class="range-value">
+                                    <span id="sensitivity-value">7</span>/10
+                                </div>
+                            </div>
+                            <small>Higher = more sensitive, more false positives</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ML Settings -->
+        <div class="settings-section" id="ml-settings">
+            <div class="section-header">
+                <h3><i class="fas fa-robot"></i> Machine Learning</h3>
+                <p>Configure AI/ML detection and model settings</p>
+            </div>
+            
+            <div class="settings-grid">
+                <div class="setting-card">
+                    <div class="setting-header">
+                        <h4><i class="fas fa-brain"></i> ML Configuration</h4>
+                    </div>
+                    <div class="setting-body">
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="enable-ml" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Enable ML detection</strong>
+                                <small>Use machine learning for anomaly detection</small>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Model Selection</label>
+                            <select id="ml-model">
+                                <option value="fnn">FNN (Fast Neural Network)</option>
+                                <option value="cnn">CNN (Convolutional NN)</option>
+                                <option value="lstm">LSTM (Long Short-Term Memory)</option>
+                                <option value="ensemble">Ensemble Model</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Confidence Threshold</label>
+                            <div class="range-input">
+                                <input type="range" id="confidence-threshold" min="50" max="99" value="85">
+                                <div class="range-value">
+                                    <span id="confidence-value">85</span>%
+                                </div>
+                            </div>
+                            <small>Minimum confidence for ML detection</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Retraining Interval</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="retrain-interval" value="24" min="1" max="720">
+                                <span class="unit">hours</span>
+                            </div>
+                            <small>How often to retrain the model</small>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="setting-card">
+                    <div class="setting-header">
+                        <h4><i class="fas fa-chart-line"></i> Training Settings</h4>
+                    </div>
+                    <div class="setting-body">
+                        <div class="form-group">
+                            <label>Training Data Size</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="training-size" value="10000" min="1000" max="1000000">
+                                <span class="unit">samples</span>
+                            </div>
+                            <small>Number of samples for training</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Epochs</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="training-epochs" value="50" min="10" max="500">
+                                <span class="unit">epochs</span>
+                            </div>
+                            <small>Training iterations</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Batch Size</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="batch-size" value="32" min="8" max="256">
+                                <span class="unit">samples</span>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="augment-data" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Data augmentation</strong>
+                                <small>Augment training data for better generalization</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="setting-card">
+                    <div class="setting-header">
+                        <h4><i class="fas fa-lightbulb"></i> ML Features</h4>
+                    </div>
+                    <div class="setting-body">
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="ml-feature-statistical" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Statistical features</strong>
+                                <small>Include statistical analysis in ML features</small>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="ml-feature-temporal" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Temporal features</strong>
+                                <small>Include time-based patterns</small>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="ml-feature-behavioral" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Behavioral features</strong>
+                                <small>Include behavioral analysis</small>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="ml-feature-header" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Header analysis</strong>
+                                <small>Analyze packet headers</small>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="ml-feature-payload">
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Payload analysis</strong>
+                                <small>Analyze packet payload (requires more CPU)</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Notification Settings -->
+        <div class="settings-section" id="notification-settings">
+            <div class="section-header">
+                <h3><i class="fas fa-bell"></i> Notification Settings</h3>
+                <p>Configure alerts and notification preferences</p>
+            </div>
+            
+            <div class="settings-grid">
+                <div class="setting-card">
+                    <div class="setting-header">
+                        <h4><i class="fas fa-envelope"></i> Notification Methods</h4>
+                    </div>
+                    <div class="setting-body">
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="notify-in-app" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>In-app notifications</strong>
+                                <small>Show notifications in dashboard</small>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="notify-email">
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Email notifications</strong>
+                                <small>Send email alerts</small>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Email Address</label>
+                            <input type="email" id="email-address" placeholder="admin@example.com">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="notify-sms">
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>SMS notifications</strong>
+                                <small>Send SMS alerts (requires provider)</small>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="notify-webhook">
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Webhook notifications</strong>
+                                <small>Send alerts to webhook URL</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="setting-card">
+                    <div class="setting-header">
+                        <h4><i class="fas fa-volume-up"></i> Alert Preferences</h4>
+                    </div>
+                    <div class="setting-body">
+                        <div class="form-group">
+                            <label>Sound Alerts</label>
+                            <select id="alert-sound">
+                                <option value="default">Default</option>
+                                <option value="chime">Chime</option>
+                                <option value="beep">Beep</option>
+                                <option value="siren">Siren</option>
+                                <option value="none">None</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Alert Volume</label>
+                            <div class="range-input">
+                                <input type="range" id="alert-volume" min="0" max="100" value="80">
+                                <div class="range-value">
+                                    <span id="volume-value">80</span>%
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Critical Alerts</label>
+                            <div class="radio-group">
+                                <label class="radio">
+                                    <input type="radio" name="critical-alerts" value="immediate" checked>
+                                    <span class="radio-checkmark"></span>
+                                    Immediate
+                                </label>
+                                <label class="radio">
+                                    <input type="radio" name="critical-alerts" value="delayed">
+                                    <span class="radio-checkmark"></span>
+                                    Delayed (5 min)
+                                </label>
+                                <label class="radio">
+                                    <input type="radio" name="critical-alerts" value="batch">
+                                    <span class="radio-checkmark"></span>
+                                    Batched
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Quiet Hours</label>
+                            <div class="time-range">
+                                <input type="time" id="quiet-start" value="22:00">
+                                <span>to</span>
+                                <input type="time" id="quiet-end" value="06:00">
+                            </div>
+                            <small>Reduce notifications during these hours</small>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="setting-card">
+                    <div class="setting-header">
+                        <h4><i class="fas fa-filter"></i> Alert Filters</h4>
+                    </div>
+                    <div class="setting-body">
+                        <div class="form-group">
+                            <label>Minimum Severity</label>
+                            <select id="min-severity">
+                                <option value="low">Low</option>
+                                <option value="medium" selected>Medium</option>
+                                <option value="high">High</option>
+                                <option value="critical">Critical</option>
+                            </select>
+                            <small>Only notify for alerts at or above this level</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Cooldown Period</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="alert-cooldown" value="300" min="0" max="3600">
+                                <span class="unit">seconds</span>
+                            </div>
+                            <small>Minimum time between similar alerts</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Daily Alert Limit</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="daily-alert-limit" value="100" min="10" max="1000">
+                                <span class="unit">alerts/day</span>
+                            </div>
+                            <small>Maximum alerts per day</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="group-alerts" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Group similar alerts</strong>
+                                <small>Combine similar alerts into one notification</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Interface Settings -->
+        <div class="settings-section" id="interface-settings">
+            <div class="section-header">
+                <h3><i class="fas fa-desktop"></i> Interface Settings</h3>
+                <p>Customize dashboard appearance and behavior</p>
+            </div>
+            
+            <div class="settings-grid">
+                <div class="setting-card">
+                    <div class="setting-header">
+                        <h4><i class="fas fa-palette"></i> Appearance</h4>
+                    </div>
+                    <div class="setting-body">
+                        <div class="form-group">
+                            <label>Theme</label>
+                            <select id="theme">
+                                <option value="light">Light</option>
+                                <option value="dark">Dark</option>
+                                <option value="auto">Auto (System)</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Color Scheme</label>
+                            <select id="color-scheme">
+                                <option value="blue">Blue</option>
+                                <option value="purple">Purple</option>
+                                <option value="green">Green</option>
+                                <option value="red">Red</option>
+                                <option value="orange">Orange</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Font Size</label>
+                            <div class="range-input">
+                                <input type="range" id="font-size" min="12" max="18" value="14">
+                                <div class="range-value">
+                                    <span id="font-value">14</span>px
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="animations" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Animations</strong>
+                                <small>Enable interface animations</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="setting-card">
+                    <div class="setting-header">
+                        <h4><i class="fas fa-columns"></i> Layout</h4>
+                    </div>
+                    <div class="setting-body">
+                        <div class="form-group">
+                            <label>Default Page</label>
+                            <select id="default-page">
+                                <option value="dashboard">Dashboard</option>
+                                <option value="traffic">Network Traffic</option>
+                                <option value="analysis">Analysis</option>
+                                <option value="attacks">Attacks</option>
+                                <option value="notifications">Notifications</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Dashboard Layout</label>
+                            <div class="radio-group">
+                                <label class="radio">
+                                    <input type="radio" name="dashboard-layout" value="compact" checked>
+                                    <span class="radio-checkmark"></span>
+                                    Compact
+                                </label>
+                                <label class="radio">
+                                    <input type="radio" name="dashboard-layout" value="spacious">
+                                    <span class="radio-checkmark"></span>
+                                    Spacious
+                                </label>
+                                <label class="radio">
+                                    <input type="radio" name="dashboard-layout" value="custom">
+                                    <span class="radio-checkmark"></span>
+                                    Custom
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Refresh Rate</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="ui-refresh-rate" value="5" min="1" max="60">
+                                <span class="unit">seconds</span>
+                            </div>
+                            <small>How often to auto-refresh data</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="auto-refresh" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Auto-refresh</strong>
+                                <small>Automatically refresh data</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="setting-card">
+                    <div class="setting-header">
+                        <h4><i class="fas fa-chart-bar"></i> Charts & Graphs</h4>
+                    </div>
+                    <div class="setting-body">
+                        <div class="form-group">
+                            <label>Chart Quality</label>
+                            <div class="radio-group">
+                                <label class="radio">
+                                    <input type="radio" name="chart-quality" value="low">
+                                    <span class="radio-checkmark"></span>
+                                    Low (Fast)
+                                </label>
+                                <label class="radio">
+                                    <input type="radio" name="chart-quality" value="medium" checked>
+                                    <span class="radio-checkmark"></span>
+                                    Medium
+                                </label>
+                                <label class="radio">
+                                    <input type="radio" name="chart-quality" value="high">
+                                    <span class="radio-checkmark"></span>
+                                    High (Detailed)
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Default Time Range</label>
+                            <select id="default-time-range">
+                                <option value="1h">Last Hour</option>
+                                <option value="6h" selected>Last 6 Hours</option>
+                                <option value="24h">Last 24 Hours</option>
+                                <option value="7d">Last 7 Days</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Data Points</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="data-points" value="100" min="10" max="1000">
+                                <span class="unit">points</span>
+                            </div>
+                            <small>Maximum data points per chart</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="smooth-charts" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Smooth charts</strong>
+                                <small>Apply smoothing to chart data</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Security Settings -->
+        <div class="settings-section" id="security-settings">
+            <div class="section-header">
+                <h3><i class="fas fa-lock"></i> Security Settings</h3>
+                <p>Configure security preferences and access control</p>
+            </div>
+            
+            <div class="settings-grid">
+                <div class="setting-card">
+                    <div class="setting-header">
+                        <h4><i class="fas fa-user-shield"></i> Authentication</h4>
+                    </div>
+                    <div class="setting-body">
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="require-auth" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Require authentication</strong>
+                                <small>Require login to access dashboard</small>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Session Timeout</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="session-timeout" value="30" min="5" max="1440">
+                                <span class="unit">minutes</span>
+                            </div>
+                            <small>Inactivity timeout before logout</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Max Login Attempts</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="max-login-attempts" value="5" min="1" max="10">
+                                <span class="unit">attempts</span>
+                            </div>
+                            <small>Failed attempts before lockout</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Lockout Duration</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="lockout-duration" value="15" min="1" max="60">
+                                <span class="unit">minutes</span>
+                            </div>
+                            <small>Account lockout duration</small>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="setting-card">
+                    <div class="setting-header">
+                        <h4><i class="fas fa-key"></i> Password Policy</h4>
+                    </div>
+                    <div class="setting-body">
+                        <div class="form-group">
+                            <label>Minimum Length</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="min-password-length" value="12" min="8" max="32">
+                                <span class="unit">characters</span>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="require-uppercase" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Require uppercase letters</strong>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="require-lowercase" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Require lowercase letters</strong>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="require-numbers" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Require numbers</strong>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="require-symbols" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Require symbols</strong>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Password Expiry</label>
+                            <div class="input-with-unit">
+                                <input type="number" id="password-expiry" value="90" min="30" max="365">
+                                <span class="unit">days</span>
+                            </div>
+                            <small>Days before password expires</small>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="setting-card">
+                    <div class="setting-header">
+                        <h4><i class="fas fa-shield-check"></i> Advanced Security</h4>
+                    </div>
+                    <div class="setting-body">
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="enable-2fa">
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Two-factor authentication</strong>
+                                <small>Require 2FA for login</small>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="https-only" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>HTTPS only</strong>
+                                <small>Require HTTPS connections</small>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="log-access" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Log access attempts</strong>
+                                <small>Log all access attempts</small>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="switch">
+                                <input type="checkbox" id="block-repeated-attacks" checked>
+                                <span class="slider"></span>
+                            </label>
+                            <div class="label-text">
+                                <strong>Auto-block repeated attacks</strong>
+                                <small>Automatically block IPs with repeated attacks</small>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Allowed IPs</label>
+                            <textarea id="allowed-ips" rows="3" placeholder="e.g., 192.168.1.0/24, 10.0.0.1"></textarea>
+                            <small>IPs allowed to access the dashboard (empty = all)</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Status Bar -->
+    <div class="settings-status-bar">
+        <div class="status-content">
+            <div class="status-indicator">
+                <div class="status-dot active"></div>
+                <span>Settings ready to save</span>
+            </div>
+            <div class="status-message" id="status-message">
+                All changes will be applied after saving.
+            </div>
+        </div>
+        <div class="status-actions">
+            <button class="btn btn-secondary" id="test-settings">
+                <i class="fas fa-vial"></i> Test Settings
+            </button>
+            <button class="btn btn-primary" id="apply-settings">
+                <i class="fas fa-check"></i> Apply Changes
+            </button>
+        </div>
+    </div>
+</div>
+
+<style>
+    .settings-container {
+        display: flex;
+        flex-direction: column;
+        gap: 25px;
+    }
+
+    /* Settings Header */
+    .settings-header {
+        background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+        border-radius: 15px;
+        padding: 30px;
+        color: white;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    }
+
+    .header-content h2 {
+        font-size: 2rem;
+        font-weight: 700;
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        gap: 15px;
+    }
+
+    .header-content p {
+        color: #cbd5e1;
+        font-size: 1.1rem;
+        margin: 0;
+    }
+
+    .header-actions {
+        display: flex;
+        gap: 15px;
+    }
+
+    .btn {
+        padding: 12px 24px;
+        border-radius: 8px;
+        border: none;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.3s;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .btn-primary {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+    }
+
+    .btn-primary:hover {
+        opacity: 0.9;
+        transform: translateY(-2px);
+    }
+
+    .btn-secondary {
+        background: #475569;
+        color: white;
+    }
+
+    .btn-secondary:hover {
+        background: #334155;
+        transform: translateY(-2px);
+    }
+
+    .btn-outline {
+        background: transparent;
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        color: white;
+    }
+
+    .btn-outline:hover {
+        background: rgba(255, 255, 255, 0.1);
+        border-color: white;
+        transform: translateY(-2px);
+    }
+
+    /* Settings Navigation */
+    .settings-nav {
+        background: white;
+        border-radius: 15px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+        border: 1px solid #e2e8f0;
+        overflow-x: auto;
+    }
+
+    .nav-tabs {
+        display: flex;
+        padding: 0 20px;
+    }
+
+    .nav-tab {
+        padding: 20px 25px;
+        border: none;
+        background: transparent;
+        color: #64748b;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.3s;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        white-space: nowrap;
+        border-bottom: 3px solid transparent;
+    }
+
+    .nav-tab:hover {
+        color: #334155;
+        background: #f8fafc;
+    }
+
+    .nav-tab.active {
+        color: #667eea;
+        border-bottom: 3px solid #667eea;
+        background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), transparent);
+    }
+
+    /* Settings Content */
+    .settings-content {
+        min-height: 600px;
+    }
+
+    .settings-section {
+        display: none;
+        animation: fadeIn 0.3s ease;
+    }
+
+    .settings-section.active {
+        display: block;
+    }
+
+    .section-header {
+        margin-bottom: 30px;
+        padding-bottom: 20px;
+        border-bottom: 2px solid #f1f5f9;
+    }
+
+    .section-header h3 {
+        color: #1e293b;
+        font-size: 1.6rem;
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        margin-bottom: 10px;
+    }
+
+    .section-header p {
+        color: #64748b;
+        font-size: 1.1rem;
+        margin: 0;
+    }
+
+    /* Settings Grid */
+    .settings-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+        gap: 25px;
+        margin-bottom: 40px;
+    }
+
+    @media (max-width: 1200px) {
+        .settings-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    .setting-card {
+        background: white;
+        border-radius: 12px;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+        overflow: hidden;
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .setting-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+    }
+
+    .setting-header {
+        background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+        padding: 20px;
+        border-bottom: 1px solid #e2e8f0;
+    }
+
+    .setting-header h4 {
+        color: #1e293b;
+        font-size: 1.2rem;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 0;
+    }
+
+    .setting-body {
+        padding: 25px;
+    }
+
+    /* Form Elements */
+    .form-group {
+        margin-bottom: 25px;
+    }
+
+    .form-group:last-child {
+        margin-bottom: 0;
+    }
+
+    .form-group label:not(.switch, .radio) {
+        display: block;
+        color: #334155;
+        font-weight: 500;
+        margin-bottom: 8px;
+        font-size: 0.95rem;
+    }
+
+    .form-group small {
+        display: block;
+        color: #94a3b8;
+        font-size: 0.85rem;
+        margin-top: 6px;
+    }
+
+    input[type="text"],
+    input[type="number"],
+    input[type="email"],
+    input[type="time"],
+    input[type="password"],
+    select,
+    textarea {
+        width: 100%;
+        padding: 12px 15px;
+        border-radius: 8px;
+        border: 2px solid #e2e8f0;
+        background: white;
+        color: #1e293b;
+        font-size: 1rem;
+        transition: all 0.3s;
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+        outline: none;
+        border-color: #667eea;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+
+    textarea {
+        resize: vertical;
+        min-height: 80px;
+        font-family: 'Monaco', 'Courier New', monospace;
+        font-size: 0.9rem;
+    }
+
+    /* Switches */
+    .switch {
+        position: relative;
+        display: inline-block;
+        width: 54px;
+        height: 28px;
+        margin-right: 15px;
+        vertical-align: middle;
+    }
+
+    .switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+    }
+
+    .slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: #cbd5e1;
+        transition: .4s;
+        border-radius: 28px;
+    }
+
+    .slider:before {
+        position: absolute;
+        content: "";
+        height: 20px;
+        width: 20px;
+        left: 4px;
+        bottom: 4px;
+        background-color: white;
+        transition: .4s;
+        border-radius: 50%;
+    }
+
+    input:checked + .slider {
+        background-color: #667eea;
+    }
+
+    input:checked + .slider:before {
+        transform: translateX(26px);
+    }
+
+    /* Radio Buttons */
+    .radio-group {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        margin-top: 8px;
+    }
+
+    .radio {
+        display: flex;
+        align-items: center;
+        cursor: pointer;
+        color: #334155;
+        font-size: 0.95rem;
+    }
+
+    .radio input {
+        display: none;
+    }
+
+    .radio-checkmark {
+        width: 20px;
+        height: 20px;
+        border: 2px solid #cbd5e1;
+        border-radius: 50%;
+        margin-right: 10px;
+        position: relative;
+        transition: all 0.3s;
+    }
+
+    .radio input:checked + .radio-checkmark {
+        border-color: #667eea;
+        background-color: #667eea;
+    }
+
+    .radio input:checked + .radio-checkmark:after {
+        content: "";
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 8px;
+        height: 8px;
+        background: white;
+        border-radius: 50%;
+    }
+
+    /* Range Inputs */
+    .range-input {
+        margin-top: 8px;
+    }
+
+    .range-input input[type="range"] {
+        width: 100%;
+        height: 6px;
+        -webkit-appearance: none;
+        background: #e2e8f0;
+        border-radius: 3px;
+        outline: none;
+    }
+
+    .range-input input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 20px;
+        height: 20px;
+        background: #667eea;
+        border-radius: 50%;
+        cursor: pointer;
+        transition: all 0.3s;
+    }
+
+    .range-input input[type="range"]::-webkit-slider-thumb:hover {
+        transform: scale(1.2);
+        background: #5a67d8;
+    }
+
+    .range-value {
+        text-align: center;
+        margin-top: 10px;
+        color: #667eea;
+        font-weight: 600;
+        font-size: 1.1rem;
+    }
+
+    /* Input with Unit */
+    .input-with-unit {
+        position: relative;
+    }
+
+    .input-with-unit input {
+        padding-right: 70px;
+    }
+
+    .unit {
+        position: absolute;
+        right: 15px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: #94a3b8;
+        font-weight: 500;
+    }
+
+    /* Time Range */
+    .time-range {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .time-range span {
+        color: #94a3b8;
+    }
+
+    .time-range input {
+        width: auto;
+        flex: 1;
+    }
+
+    /* Label with Switch */
+    .label-text {
+        display: inline-block;
+        vertical-align: middle;
+    }
+
+    .label-text strong {
+        display: block;
+        color: #334155;
+        font-weight: 600;
+        margin-bottom: 2px;
+    }
+
+    .label-text small {
+        display: block;
+        color: #94a3b8;
+        font-size: 0.85rem;
+        margin-top: 0;
+    }
+
+    /* Settings Status Bar */
+    .settings-status-bar {
+        position: sticky;
+        bottom: 0;
+        background: white;
+        border-radius: 15px;
+        padding: 20px 30px;
+        box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.08);
+        border: 1px solid #e2e8f0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 20px;
+    }
+
+    .status-content {
+        display: flex;
+        align-items: center;
+        gap: 20px;
+    }
+
+    .status-indicator {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .status-dot {
+        width: 10px;
+        height: 10px;
+        background: #10b981;
+        border-radius: 50%;
+        animation: pulse 2s infinite;
+    }
+
+    .status-dot.active {
+        background: #10b981;
+    }
+
+    .status-dot.warning {
+        background: #f59e0b;
+    }
+
+    .status-dot.error {
+        background: #ef4444;
+    }
+
+    .status-message {
+        color: #64748b;
+        font-size: 0.95rem;
+    }
+
+    .status-actions {
+        display: flex;
+        gap: 15px;
+    }
+
+    /* Animations */
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(10px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    @keyframes pulse {
+        0%, 100% {
+            opacity: 1;
+        }
+        50% {
+            opacity: 0.5;
+        }
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+        .settings-header {
+            flex-direction: column;
+            gap: 20px;
+            text-align: center;
+        }
+        
+        .header-actions {
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        
+        .nav-tabs {
+            flex-wrap: wrap;
+        }
+        
+        .settings-status-bar {
+            flex-direction: column;
+            gap: 20px;
+            text-align: center;
+        }
+        
+        .status-content {
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .status-actions {
+            width: 100%;
+            justify-content: center;
+        }
+    }
+</style>
+
+<script>
+    // Initialize on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        loadSettings();
+        setupEventListeners();
+        setupRangeInputs();
+    });
+
+    // Load saved settings from localStorage
+    function loadSettings() {
+        const savedSettings = localStorage.getItem('ids-settings');
+        if (savedSettings) {
+            const settings = JSON.parse(savedSettings);
+            applySettingsToForm(settings);
+            showStatus('Settings loaded from storage', 'success');
+        } else {
+            loadDefaultSettings();
+        }
+    }
+
+    function loadDefaultSettings() {
+        // These should match your main.py defaults
+        const defaultSettings = {
+            general: {
+                autoStart: true,
+                autoUpdate: true,
+                logLevel: 'info',
+                packetBuffer: 500,
+                logRetention: 30,
+                compressLogs: true,
+                updateInterval: 2,
+                cpuLimit: 60,
+                performanceMode: true
+            },
+            network: {
+                interface: 'wlan0',
+                promiscuous: true,
+                captureFilter: '',
+                captureTimeout: 0,
+                maxPacketSize: 65535,
+                captureDNS: true,
+                ignoreLocal: true,
+                monitorPorts: '',
+                whitelistIPs: '',
+                blacklistIPs: ''
+            },
+            detection: {
+                dosThreshold: 500,
+                ddosSourceThreshold: 5,
+                ddosTotalThreshold: 1500,
+                enableDoSDetection: true,
+                tcpScanThreshold: 20,
+                udpScanThreshold: 15,
+                icmpScanThreshold: 5,
+                enablePortScanDetection: true,
+                detectSlowloris: false,
+                detectLandAttack: true,
+                detectSmurf: true,
+                detectXmasScan: false,
+                detectionSensitivity: 7
+            },
+            ml: {
+                enableML: true,
+                model: 'fnn',
+                confidenceThreshold: 85,
+                retrainInterval: 24,
+                trainingSize: 10000,
+                trainingEpochs: 50,
+                batchSize: 32,
+                augmentData: true,
+                statisticalFeatures: true,
+                temporalFeatures: true,
+                behavioralFeatures: true,
+                headerAnalysis: true,
+                payloadAnalysis: false
+            },
+            notifications: {
+                inApp: true,
+                email: false,
+                emailAddress: '',
+                sms: false,
+                webhook: false,
+                alertSound: 'default',
+                alertVolume: 80,
+                criticalAlerts: 'immediate',
+                quietStart: '22:00',
+                quietEnd: '06:00',
+                minSeverity: 'medium',
+                alertCooldown: 300,
+                dailyAlertLimit: 100,
+                groupAlerts: true
+            },
+            interface: {
+                theme: 'light',
+                colorScheme: 'blue',
+                fontSize: 14,
+                animations: true,
+                defaultPage: 'dashboard',
+                dashboardLayout: 'compact',
+                uiRefreshRate: 5,
+                autoRefresh: true,
+                chartQuality: 'medium',
+                defaultTimeRange: '6h',
+                dataPoints: 100,
+                smoothCharts: true
+            },
+            security: {
+                requireAuth: true,
+                sessionTimeout: 30,
+                maxLoginAttempts: 5,
+                lockoutDuration: 15,
+                minPasswordLength: 12,
+                requireUppercase: true,
+                requireLowercase: true,
+                requireNumbers: true,
+                requireSymbols: true,
+                passwordExpiry: 90,
+                enable2FA: false,
+                httpsOnly: true,
+                logAccess: true,
+                blockRepeatedAttacks: true,
+                allowedIPs: ''
+            }
+        };
+        
+        applySettingsToForm(defaultSettings);
+        showStatus('Default settings loaded', 'info');
+    }
+
+    function applySettingsToForm(settings) {
+        // General Settings
+        document.getElementById('auto-start').checked = settings.general.autoStart;
+        document.getElementById('auto-update').checked = settings.general.autoUpdate;
+        document.getElementById('log-level').value = settings.general.logLevel;
+        document.getElementById('packet-buffer').value = settings.general.packetBuffer;
+        document.getElementById('log-retention').value = settings.general.logRetention;
+        document.getElementById('compress-logs').checked = settings.general.compressLogs;
+        document.getElementById('update-interval').value = settings.general.updateInterval;
+        document.getElementById('cpu-limit').value = settings.general.cpuLimit;
+        document.getElementById('cpu-value').textContent = settings.general.cpuLimit;
+        document.getElementById('performance-mode').checked = settings.general.performanceMode;
+        
+        // Network Settings
+        document.getElementById('network-interface').value = settings.network.interface;
+        document.querySelector(`input[name="promiscuous"][value="${settings.network.promiscuous}"]`).checked = true;
+        document.getElementById('capture-filter').value = settings.network.captureFilter;
+        document.getElementById('capture-timeout').value = settings.network.captureTimeout;
+        document.getElementById('max-packet-size').value = settings.network.maxPacketSize;
+        document.getElementById('capture-dns').checked = settings.network.captureDNS;
+        document.getElementById('ignore-local').checked = settings.network.ignoreLocal;
+        document.getElementById('monitor-ports').value = settings.network.monitorPorts;
+        document.getElementById('whitelist-ips').value = settings.network.whitelistIPs;
+        document.getElementById('blacklist-ips').value = settings.network.blacklistIPs;
+        
+        // Detection Settings
+        document.getElementById('dos-threshold').value = settings.detection.dosThreshold;
+        document.getElementById('ddos-source-threshold').value = settings.detection.ddosSourceThreshold;
+        document.getElementById('ddos-total-threshold').value = settings.detection.ddosTotalThreshold;
+        document.getElementById('enable-dos-detection').checked = settings.detection.enableDoSDetection;
+        document.getElementById('tcp-scan-threshold').value = settings.detection.tcpScanThreshold;
+        document.getElementById('udp-scan-threshold').value = settings.detection.udpScanThreshold;
+        document.getElementById('icmp-scan-threshold').value = settings.detection.icmpScanThreshold;
+        document.getElementById('enable-port-scan-detection').checked = settings.detection.enablePortScanDetection;
+        document.getElementById('detect-slowloris').checked = settings.detection.detectSlowloris;
+        document.getElementById('detect-land-attack').checked = settings.detection.detectLandAttack;
+        document.getElementById('detect-smurf').checked = settings.detection.detectSmurf;
+        document.getElementById('detect-xmas-scan').checked = settings.detection.detectXmasScan;
+        document.getElementById('detection-sensitivity').value = settings.detection.detectionSensitivity;
+        document.getElementById('sensitivity-value').textContent = settings.detection.detectionSensitivity;
+        
+        // ML Settings
+        document.getElementById('enable-ml').checked = settings.ml.enableML;
+        document.getElementById('ml-model').value = settings.ml.model;
+        document.getElementById('confidence-threshold').value = settings.ml.confidenceThreshold;
+        document.getElementById('confidence-value').textContent = settings.ml.confidenceThreshold;
+        document.getElementById('retrain-interval').value = settings.ml.retrainInterval;
+        document.getElementById('training-size').value = settings.ml.trainingSize;
+        document.getElementById('training-epochs').value = settings.ml.trainingEpochs;
+        document.getElementById('batch-size').value = settings.ml.batchSize;
+        document.getElementById('augment-data').checked = settings.ml.augmentData;
+        document.getElementById('ml-feature-statistical').checked = settings.ml.statisticalFeatures;
+        document.getElementById('ml-feature-temporal').checked = settings.ml.temporalFeatures;
+        document.getElementById('ml-feature-behavioral').checked = settings.ml.behavioralFeatures;
+        document.getElementById('ml-feature-header').checked = settings.ml.headerAnalysis;
+        document.getElementById('ml-feature-payload').checked = settings.ml.payloadAnalysis;
+        
+        // Notification Settings
+        document.getElementById('notify-in-app').checked = settings.notifications.inApp;
+        document.getElementById('notify-email').checked = settings.notifications.email;
+        document.getElementById('email-address').value = settings.notifications.emailAddress;
+        document.getElementById('notify-sms').checked = settings.notifications.sms;
+        document.getElementById('notify-webhook').checked = settings.notifications.webhook;
+        document.getElementById('alert-sound').value = settings.notifications.alertSound;
+        document.getElementById('alert-volume').value = settings.notifications.alertVolume;
+        document.getElementById('volume-value').textContent = settings.notifications.alertVolume;
+        document.querySelector(`input[name="critical-alerts"][value="${settings.notifications.criticalAlerts}"]`).checked = true;
+        document.getElementById('quiet-start').value = settings.notifications.quietStart;
+        document.getElementById('quiet-end').value = settings.notifications.quietEnd;
+        document.getElementById('min-severity').value = settings.notifications.minSeverity;
+        document.getElementById('alert-cooldown').value = settings.notifications.alertCooldown;
+        document.getElementById('daily-alert-limit').value = settings.notifications.dailyAlertLimit;
+        document.getElementById('group-alerts').checked = settings.notifications.groupAlerts;
+        
+        // Interface Settings
+        document.getElementById('theme').value = settings.interface.theme;
+        document.getElementById('color-scheme').value = settings.interface.colorScheme;
+        document.getElementById('font-size').value = settings.interface.fontSize;
+        document.getElementById('font-value').textContent = settings.interface.fontSize;
+        document.getElementById('animations').checked = settings.interface.animations;
+        document.getElementById('default-page').value = settings.interface.defaultPage;
+        document.querySelector(`input[name="dashboard-layout"][value="${settings.interface.dashboardLayout}"]`).checked = true;
+        document.getElementById('ui-refresh-rate').value = settings.interface.uiRefreshRate;
+        document.getElementById('auto-refresh').checked = settings.interface.autoRefresh;
+        document.querySelector(`input[name="chart-quality"][value="${settings.interface.chartQuality}"]`).checked = true;
+        document.getElementById('default-time-range').value = settings.interface.defaultTimeRange;
+        document.getElementById('data-points').value = settings.interface.dataPoints;
+        document.getElementById('smooth-charts').checked = settings.interface.smoothCharts;
+        
+        // Security Settings
+        document.getElementById('require-auth').checked = settings.security.requireAuth;
+        document.getElementById('session-timeout').value = settings.security.sessionTimeout;
+        document.getElementById('max-login-attempts').value = settings.security.maxLoginAttempts;
+        document.getElementById('lockout-duration').value = settings.security.lockoutDuration;
+        document.getElementById('min-password-length').value = settings.security.minPasswordLength;
+        document.getElementById('require-uppercase').checked = settings.security.requireUppercase;
+        document.getElementById('require-lowercase').checked = settings.security.requireLowercase;
+        document.getElementById('require-numbers').checked = settings.security.requireNumbers;
+        document.getElementById('require-symbols').checked = settings.security.requireSymbols;
+        document.getElementById('password-expiry').value = settings.security.passwordExpiry;
+        document.getElementById('enable-2fa').checked = settings.security.enable2FA;
+        document.getElementById('https-only').checked = settings.security.httpsOnly;
+        document.getElementById('log-access').checked = settings.security.logAccess;
+        document.getElementById('block-repeated-attacks').checked = settings.security.blockRepeatedAttacks;
+        document.getElementById('allowed-ips').value = settings.security.allowedIPs;
+    }
+
+    function collectSettings() {
+        return {
+            general: {
+                autoStart: document.getElementById('auto-start').checked,
+                autoUpdate: document.getElementById('auto-update').checked,
+                logLevel: document.getElementById('log-level').value,
+                packetBuffer: parseInt(document.getElementById('packet-buffer').value),
+                logRetention: parseInt(document.getElementById('log-retention').value),
+                compressLogs: document.getElementById('compress-logs').checked,
+                updateInterval: parseInt(document.getElementById('update-interval').value),
+                cpuLimit: parseInt(document.getElementById('cpu-limit').value),
+                performanceMode: document.getElementById('performance-mode').checked
+            },
+            network: {
+                interface: document.getElementById('network-interface').value,
+                promiscuous: document.querySelector('input[name="promiscuous"]:checked').value === 'true',
+                captureFilter: document.getElementById('capture-filter').value,
+                captureTimeout: parseInt(document.getElementById('capture-timeout').value),
+                maxPacketSize: parseInt(document.getElementById('max-packet-size').value),
+                captureDNS: document.getElementById('capture-dns').checked,
+                ignoreLocal: document.getElementById('ignore-local').checked,
+                monitorPorts: document.getElementById('monitor-ports').value,
+                whitelistIPs: document.getElementById('whitelist-ips').value,
+                blacklistIPs: document.getElementById('blacklist-ips').value
+            },
+            detection: {
+                dosThreshold: parseInt(document.getElementById('dos-threshold').value),
+                ddosSourceThreshold: parseInt(document.getElementById('ddos-source-threshold').value),
+                ddosTotalThreshold: parseInt(document.getElementById('ddos-total-threshold').value),
+                enableDoSDetection: document.getElementById('enable-dos-detection').checked,
+                tcpScanThreshold: parseInt(document.getElementById('tcp-scan-threshold').value),
+                udpScanThreshold: parseInt(document.getElementById('udp-scan-threshold').value),
+                icmpScanThreshold: parseInt(document.getElementById('icmp-scan-threshold').value),
+                enablePortScanDetection: document.getElementById('enable-port-scan-detection').checked,
+                detectSlowloris: document.getElementById('detect-slowloris').checked,
+                detectLandAttack: document.getElementById('detect-land-attack').checked,
+                detectSmurf: document.getElementById('detect-smurf').checked,
+                detectXmasScan: document.getElementById('detect-xmas-scan').checked,
+                detectionSensitivity: parseInt(document.getElementById('detection-sensitivity').value)
+            },
+            ml: {
+                enableML: document.getElementById('enable-ml').checked,
+                model: document.getElementById('ml-model').value,
+                confidenceThreshold: parseInt(document.getElementById('confidence-threshold').value),
+                retrainInterval: parseInt(document.getElementById('retrain-interval').value),
+                trainingSize: parseInt(document.getElementById('training-size').value),
+                trainingEpochs: parseInt(document.getElementById('training-epochs').value),
+                batchSize: parseInt(document.getElementById('batch-size').value),
+                augmentData: document.getElementById('augment-data').checked,
+                statisticalFeatures: document.getElementById('ml-feature-statistical').checked,
+                temporalFeatures: document.getElementById('ml-feature-temporal').checked,
+                behavioralFeatures: document.getElementById('ml-feature-behavioral').checked,
+                headerAnalysis: document.getElementById('ml-feature-header').checked,
+                payloadAnalysis: document.getElementById('ml-feature-payload').checked
+            },
+            notifications: {
+                inApp: document.getElementById('notify-in-app').checked,
+                email: document.getElementById('notify-email').checked,
+                emailAddress: document.getElementById('email-address').value,
+                sms: document.getElementById('notify-sms').checked,
+                webhook: document.getElementById('notify-webhook').checked,
+                alertSound: document.getElementById('alert-sound').value,
+                alertVolume: parseInt(document.getElementById('alert-volume').value),
+                criticalAlerts: document.querySelector('input[name="critical-alerts"]:checked').value,
+                quietStart: document.getElementById('quiet-start').value,
+                quietEnd: document.getElementById('quiet-end').value,
+                minSeverity: document.getElementById('min-severity').value,
+                alertCooldown: parseInt(document.getElementById('alert-cooldown').value),
+                dailyAlertLimit: parseInt(document.getElementById('daily-alert-limit').value),
+                groupAlerts: document.getElementById('group-alerts').checked
+            },
+            interface: {
+                theme: document.getElementById('theme').value,
+                colorScheme: document.getElementById('color-scheme').value,
+                fontSize: parseInt(document.getElementById('font-size').value),
+                animations: document.getElementById('animations').checked,
+                defaultPage: document.getElementById('default-page').value,
+                dashboardLayout: document.querySelector('input[name="dashboard-layout"]:checked').value,
+                uiRefreshRate: parseInt(document.getElementById('ui-refresh-rate').value),
+                autoRefresh: document.getElementById('auto-refresh').checked,
+                chartQuality: document.querySelector('input[name="chart-quality"]:checked').value,
+                defaultTimeRange: document.getElementById('default-time-range').value,
+                dataPoints: parseInt(document.getElementById('data-points').value),
+                smoothCharts: document.getElementById('smooth-charts').checked
+            },
+            security: {
+                requireAuth: document.getElementById('require-auth').checked,
+                sessionTimeout: parseInt(document.getElementById('session-timeout').value),
+                maxLoginAttempts: parseInt(document.getElementById('max-login-attempts').value),
+                lockoutDuration: parseInt(document.getElementById('lockout-duration').value),
+                minPasswordLength: parseInt(document.getElementById('min-password-length').value),
+                requireUppercase: document.getElementById('require-uppercase').checked,
+                requireLowercase: document.getElementById('require-lowercase').checked,
+                requireNumbers: document.getElementById('require-numbers').checked,
+                requireSymbols: document.getElementById('require-symbols').checked,
+                passwordExpiry: parseInt(document.getElementById('password-expiry').value),
+                enable2FA: document.getElementById('enable-2fa').checked,
+                httpsOnly: document.getElementById('https-only').checked,
+                logAccess: document.getElementById('log-access').checked,
+                blockRepeatedAttacks: document.getElementById('block-repeated-attacks').checked,
+                allowedIPs: document.getElementById('allowed-ips').value
+            }
+        };
+    }
+
+    function saveSettings() {
+        const settings = collectSettings();
+        localStorage.setItem('ids-settings', JSON.stringify(settings));
+        showStatus('Settings saved successfully', 'success');
+        
+        // Apply interface settings immediately
+        applyInterfaceSettings(settings.interface);
+    }
+
+    function applyInterfaceSettings(interfaceSettings) {
+        // Apply theme
+        document.body.classList.remove('theme-light', 'theme-dark');
+        document.body.classList.add(`theme-${interfaceSettings.theme}`);
+        
+        // Apply font size
+        document.documentElement.style.fontSize = `${interfaceSettings.fontSize}px`;
+        
+        // Apply color scheme
+        applyColorScheme(interfaceSettings.colorScheme);
+        
+        showStatus('Interface settings applied', 'success');
+    }
+
+    function applyColorScheme(scheme) {
+        const root = document.documentElement;
+        const colors = {
+            blue: { primary: '#667eea', secondary: '#764ba2' },
+            purple: { primary: '#8b5cf6', secondary: '#7c3aed' },
+            green: { primary: '#10b981', secondary: '#059669' },
+            red: { primary: '#ef4444', secondary: '#dc2626' },
+            orange: { primary: '#f59e0b', secondary: '#d97706' }
+        };
+        
+        const color = colors[scheme] || colors.blue;
+        root.style.setProperty('--primary-color', color.primary);
+        root.style.setProperty('--secondary-color', color.secondary);
+    }
+
+    function setupRangeInputs() {
+        // CPU Limit
+        document.getElementById('cpu-limit').addEventListener('input', function() {
+            document.getElementById('cpu-value').textContent = this.value;
+        });
+        
+        // Detection Sensitivity
+        document.getElementById('detection-sensitivity').addEventListener('input', function() {
+            document.getElementById('sensitivity-value').textContent = this.value;
+        });
+        
+        // Confidence Threshold
+        document.getElementById('confidence-threshold').addEventListener('input', function() {
+            document.getElementById('confidence-value').textContent = this.value;
+        });
+        
+        // Alert Volume
+        document.getElementById('alert-volume').addEventListener('input', function() {
+            document.getElementById('volume-value').textContent = this.value;
+        });
+        
+        // Font Size
+        document.getElementById('font-size').addEventListener('input', function() {
+            document.getElementById('font-value').textContent = this.value;
+        });
+    }
+
+    function setupEventListeners() {
+        // Tab switching
+        document.querySelectorAll('.nav-tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                const tabId = this.dataset.tab;
+                
+                // Update active tab
+                document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+                this.classList.add('active');
+                
+                // Show corresponding section
+                document.querySelectorAll('.settings-section').forEach(section => {
+                    section.classList.remove('active');
+                });
+                document.getElementById(`${tabId}-settings`).classList.add('active');
+            });
+        });
+        
+        // Save settings
+        document.getElementById('save-settings').addEventListener('click', function() {
+            saveSettings();
+        });
+        
+        // Reset to defaults
+        document.getElementById('reset-settings').addEventListener('click', function() {
+            if (confirm('Are you sure you want to reset all settings to defaults?')) {
+                localStorage.removeItem('ids-settings');
+                loadDefaultSettings();
+                showStatus('Settings reset to defaults', 'warning');
+            }
+        });
+        
+        // Export config
+        document.getElementById('export-config').addEventListener('click', function() {
+            const settings = collectSettings();
+            const config = {
+                version: '1.0.0',
+                timestamp: new Date().toISOString(),
+                settings: settings
+            };
+            
+            const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `ids-config-${new Date().toISOString().split('T')[0]}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            showStatus('Configuration exported', 'success');
+        });
+        
+        // Test settings
+        document.getElementById('test-settings').addEventListener('click', function() {
+            const settings = collectSettings();
+            
+            // Validate settings
+            const issues = validateSettings(settings);
+            
+            if (issues.length > 0) {
+                showStatus(`Found ${issues.length} issues: ${issues.join(', ')}`, 'error');
+            } else {
+                showStatus('All settings validated successfully', 'success');
+            }
+        });
+        
+        // Apply settings
+        document.getElementById('apply-settings').addEventListener('click', function() {
+            saveSettings();
+            
+            // Show confirmation
+            showStatus('Settings applied. Some changes may require restart.', 'success');
+            
+            // Simulate applying to backend
+            setTimeout(() => {
+                showStatus('All settings have been applied successfully', 'success');
+            }, 1500);
+        });
+        
+        // Settings change detection
+        const formElements = document.querySelectorAll('input, select, textarea');
+        formElements.forEach(element => {
+            element.addEventListener('change', function() {
+                updateStatusIndicator();
+            });
+        });
+    }
+
+    function validateSettings(settings) {
+        const issues = [];
+        
+        // Validate network settings
+        if (settings.network.captureTimeout < 0 || settings.network.captureTimeout > 300) {
+            issues.push('Capture timeout must be between 0 and 300 seconds');
+        }
+        
+        if (settings.network.maxPacketSize < 68 || settings.network.maxPacketSize > 65535) {
+            issues.push('Max packet size must be between 68 and 65535 bytes');
+        }
+        
+        // Validate detection settings
+        if (settings.detection.dosThreshold < 10 || settings.detection.dosThreshold > 10000) {
+            issues.push('DoS threshold must be between 10 and 10000 packets/sec');
+        }
+        
+        if (settings.detection.ddosSourceThreshold < 2 || settings.detection.ddosSourceThreshold > 100) {
+            issues.push('DDoS source threshold must be between 2 and 100 sources');
+        }
+        
+        if (settings.detection.tcpScanThreshold < 5 || settings.detection.tcpScanThreshold > 1000) {
+            issues.push('TCP scan threshold must be between 5 and 1000 ports');
+        }
+        
+        // Validate email if enabled
+        if (settings.notifications.email && !isValidEmail(settings.notifications.emailAddress)) {
+            issues.push('Valid email address is required when email notifications are enabled');
+        }
+        
+        return issues;
+    }
+
+    function isValidEmail(email) {
+        const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        return re.test(email);
+    }
+
+    function updateStatusIndicator() {
+        const statusDot = document.querySelector('.status-dot');
+        statusDot.classList.remove('active', 'warning', 'error');
+        statusDot.classList.add('warning');
+        
+        const statusMessage = document.getElementById('status-message');
+        statusMessage.textContent = 'Unsaved changes detected';
+        statusMessage.style.color = '#f59e0b';
+    }
+
+    function showStatus(message, type = 'info') {
+        const statusMessage = document.getElementById('status-message');
+        const statusDot = document.querySelector('.status-dot');
+        
+        // Update message
+        statusMessage.textContent = message;
+        
+        // Update color based on type
+        switch (type) {
+            case 'success':
+                statusMessage.style.color = '#10b981';
+                statusDot.className = 'status-dot active';
+                break;
+            case 'warning':
+                statusMessage.style.color = '#f59e0b';
+                statusDot.className = 'status-dot warning';
+                break;
+            case 'error':
+                statusMessage.style.color = '#ef4444';
+                statusDot.className = 'status-dot error';
+                break;
+            default:
+                statusMessage.style.color = '#64748b';
+                statusDot.className = 'status-dot active';
+        }
+        
+        // Auto-clear after 5 seconds for success messages
+        if (type === 'success') {
+            setTimeout(() => {
+                statusMessage.textContent = 'All settings have been saved';
+                statusMessage.style.color = '#64748b';
+                statusDot.className = 'status-dot active';
+            }, 5000);
+        }
+    }
+
+    // Export settings for use in other pages
+    window.getCurrentSettings = function() {
+        return collectSettings();
+    };
+</script>
+
+<!-- Add theme styles -->
+<style>
+    .theme-light {
+        --bg-primary: #ffffff;
+        --bg-secondary: #f8fafc;
+        --text-primary: #1e293b;
+        --text-secondary: #64748b;
+    }
+    
+    .theme-dark {
+        --bg-primary: #0f172a;
+        --bg-secondary: #1e293b;
+        --text-primary: #f1f5f9;
+        --text-secondary: #94a3b8;
+    }
+    
+    body {
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        transition: background-color 0.3s, color 0.3s;
+    }
+    
+    :root {
+        --primary-color: #667eea;
+        --secondary-color: #764ba2;
+    }
+</style>
+{% endblock %}

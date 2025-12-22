@@ -1,0 +1,804 @@
+{% extends "base.html" %}
+
+{% block pagetitle %}Network Traffic{% endblock %}
+{% block title %}Network Traffic Monitor{% endblock %}
+{% block subtitle %}Real-time packet analysis and traffic visualization{% endblock %}
+
+{% block content %}
+<style>
+    /* Network Traffic Page Specific Styles */
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 20px;
+        margin-bottom: 30px;
+    }
+
+    .stat-card {
+        background: white;
+        border-radius: 12px;
+        padding: 25px;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        border-left: 4px solid;
+    }
+
+    .stat-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.12);
+    }
+
+    .stat-card.tcp {
+        border-left-color: #667eea;
+    }
+
+    .stat-card.udp {
+        border-left-color: #764ba2;
+    }
+
+    .stat-card.icmp {
+        border-left-color: #f59e0b;
+    }
+
+    .stat-card.total {
+        border-left-color: #10b981;
+    }
+
+    .stat-icon {
+        font-size: 2.5rem;
+        margin-bottom: 15px;
+        opacity: 0.8;
+    }
+
+    .stat-value {
+        font-size: 2.2rem;
+        font-weight: 700;
+        margin-bottom: 5px;
+        color: #1e293b;
+    }
+
+    .stat-label {
+        font-size: 1rem;
+        color: #64748b;
+        font-weight: 500;
+    }
+
+    .stat-trend {
+        font-size: 0.85rem;
+        margin-top: 10px;
+        padding: 4px 10px;
+        border-radius: 12px;
+        display: inline-block;
+    }
+
+    .trend-up {
+        background: #d1fae5;
+        color: #065f46;
+    }
+
+    .trend-down {
+        background: #fee2e2;
+        color: #991b1b;
+    }
+
+    .traffic-section {
+        display: grid;
+        grid-template-columns: 2fr 1fr;
+        gap: 25px;
+        margin-bottom: 30px;
+    }
+
+    @media (max-width: 1024px) {
+        .traffic-section {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    .traffic-chart-container {
+        background: white;
+        border-radius: 12px;
+        padding: 25px;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+    }
+
+    .chart-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+    }
+
+    .chart-title {
+        font-size: 1.3rem;
+        font-weight: 600;
+        color: #1e293b;
+    }
+
+    .chart-controls {
+        display: flex;
+        gap: 10px;
+    }
+
+    .time-btn {
+        padding: 8px 16px;
+        border: 1px solid #e2e8f0;
+        background: white;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 0.9rem;
+        color: #64748b;
+        transition: all 0.3s;
+    }
+
+    .time-btn.active {
+        background: #667eea;
+        color: white;
+        border-color: #667eea;
+    }
+
+    .traffic-table-container {
+        background: white;
+        border-radius: 12px;
+        padding: 25px;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+        overflow: hidden;
+    }
+
+    .table-wrapper {
+        overflow-x: auto;
+        margin-top: 20px;
+    }
+
+    .traffic-table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 600px;
+    }
+
+    .traffic-table thead {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+    }
+
+    .traffic-table th {
+        padding: 15px;
+        text-align: left;
+        font-weight: 600;
+        font-size: 0.95rem;
+    }
+
+    .traffic-table tbody tr {
+        border-bottom: 1px solid #f1f5f9;
+        transition: background 0.3s;
+    }
+
+    .traffic-table tbody tr:hover {
+        background: #f8fafc;
+    }
+
+    .traffic-table td {
+        padding: 15px;
+        color: #475569;
+        font-size: 0.95rem;
+    }
+
+    .protocol-badge {
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        font-weight: 500;
+    }
+
+    .protocol-tcp {
+        background: #dbeafe;
+        color: #1e40af;
+    }
+
+    .protocol-udp {
+        background: #ede9fe;
+        color: #5b21b6;
+    }
+
+    .protocol-icmp {
+        background: #fef3c7;
+        color: #92400e;
+    }
+
+    .packet-size {
+        font-family: 'Courier New', monospace;
+        font-weight: 600;
+    }
+
+    .source-ip {
+        color: #1e40af;
+        font-weight: 500;
+    }
+
+    .destination-ip {
+        color: #7c3aed;
+        font-weight: 500;
+    }
+
+    .traffic-controls {
+        background: white;
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+        margin-bottom: 25px;
+    }
+
+    .control-row {
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        flex-wrap: wrap;
+    }
+
+    .control-group {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .control-label {
+        font-weight: 500;
+        color: #475569;
+        white-space: nowrap;
+    }
+
+    .select-control {
+        padding: 10px 15px;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        background: white;
+        color: #334155;
+        font-size: 0.95rem;
+        min-width: 150px;
+    }
+
+    .btn {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 8px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.3s;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .btn-primary {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+    }
+
+    .btn-primary:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn-secondary {
+        background: #f1f5f9;
+        color: #475569;
+        border: 1px solid #e2e8f0;
+    }
+
+    .btn-secondary:hover {
+        background: #e2e8f0;
+    }
+
+    .btn-danger {
+        background: #ef4444;
+        color: white;
+    }
+
+    .btn-danger:hover {
+        background: #dc2626;
+    }
+
+    .btn-success {
+        background: #10b981;
+        color: white;
+    }
+
+    .btn-success:hover {
+        background: #059669;
+    }
+
+    .live-indicator {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: auto;
+    }
+
+    .live-dot {
+        width: 10px;
+        height: 10px;
+        background: #ef4444;
+        border-radius: 50%;
+        animation: pulse 1s infinite;
+    }
+
+    .filter-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 15px;
+    }
+
+    .filter-tag {
+        padding: 6px 12px;
+        background: #f1f5f9;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        color: #475569;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .filter-tag .remove {
+        cursor: pointer;
+        color: #94a3b8;
+    }
+
+    .filter-tag .remove:hover {
+        color: #ef4444;
+    }
+
+    .refresh-info {
+        text-align: right;
+        color: #64748b;
+        font-size: 0.9rem;
+        margin-top: 20px;
+    }
+</style>
+
+<div class="traffic-controls">
+    <div class="control-row">
+        <div class="control-group">
+            <span class="control-label">Interface:</span>
+            <select class="select-control" id="interface-select">
+                <option value="wlan0" selected>wlan0 (WiFi)</option>
+                <option value="eth0">eth0 (Ethernet)</option>
+                <option value="any">Any (All Interfaces)</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <span class="control-label">Protocol:</span>
+            <select class="select-control" id="protocol-select">
+                <option value="all">All Protocols</option>
+                <option value="tcp">TCP Only</option>
+                <option value="udp">UDP Only</option>
+                <option value="icmp">ICMP Only</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <span class="control-label">Time Range:</span>
+            <select class="select-control" id="time-range">
+                <option value="5">Last 5 minutes</option>
+                <option value="15" selected>Last 15 minutes</option>
+                <option value="30">Last 30 minutes</option>
+                <option value="60">Last hour</option>
+                <option value="custom">Custom Range</option>
+            </select>
+        </div>
+
+        <button class="btn btn-primary" id="apply-filters">
+            <i class="fas fa-filter"></i> Apply Filters
+        </button>
+
+        <button class="btn btn-secondary" id="clear-filters">
+            <i class="fas fa-times"></i> Clear All
+        </button>
+
+        <div class="live-indicator">
+            <div class="live-dot"></div>
+            <span>LIVE</span>
+        </div>
+    </div>
+
+    <div class="filter-tags" id="active-filters">
+        <!-- Active filters will appear here -->
+    </div>
+</div>
+
+<!-- Statistics Cards -->
+<div class="stats-grid">
+    <div class="stat-card tcp">
+        <div class="stat-icon">
+            <i class="fas fa-exchange-alt"></i>
+        </div>
+        <div class="stat-value" id="tcp-count">1,245</div>
+        <div class="stat-label">TCP Packets</div>
+        <div class="stat-trend trend-up">
+            <i class="fas fa-arrow-up"></i> 12.5%
+        </div>
+    </div>
+
+    <div class="stat-card udp">
+        <div class="stat-icon">
+            <i class="fas fa-broadcast-tower"></i>
+        </div>
+        <div class="stat-value" id="udp-count">892</div>
+        <div class="stat-label">UDP Packets</div>
+        <div class="stat-trend trend-down">
+            <i class="fas fa-arrow-down"></i> 3.2%
+        </div>
+    </div>
+
+    <div class="stat-card icmp">
+        <div class="stat-icon">
+            <i class="fas fa-satellite-dish"></i>
+        </div>
+        <div class="stat-value" id="icmp-count">56</div>
+        <div class="stat-label">ICMP Packets</div>
+        <div class="stat-trend trend-up">
+            <i class="fas fa-arrow-up"></i> 5.7%
+        </div>
+    </div>
+
+    <div class="stat-card total">
+        <div class="stat-icon">
+            <i class="fas fa-chart-bar"></i>
+        </div>
+        <div class="stat-value" id="total-count">2,193</div>
+        <div class="stat-label">Total Packets</div>
+        <div class="stat-trend trend-up">
+            <i class="fas fa-arrow-up"></i> 8.3%
+        </div>
+    </div>
+</div>
+
+<!-- Charts and Table Section -->
+<div class="traffic-section">
+    <div class="traffic-chart-container">
+        <div class="chart-header">
+            <div class="chart-title">Traffic Volume Over Time</div>
+            <div class="chart-controls">
+                <button class="time-btn active" data-time="1h">1H</button>
+                <button class="time-btn" data-time="6h">6H</button>
+                <button class="time-btn" data-time="24h">24H</button>
+                <button class="time-btn" data-time="7d">7D</button>
+            </div>
+        </div>
+        <div id="traffic-chart" style="height: 300px;">
+            <!-- Chart will be rendered here -->
+            <div class="chart-placeholder">
+                <i class="fas fa-chart-line" style="font-size: 3rem; color: #e2e8f0; margin-bottom: 20px;"></i>
+                <p style="color: #94a3b8;">Loading traffic data...</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="traffic-table-container">
+        <div class="chart-header">
+            <div class="chart-title">Top Source IPs</div>
+            <button class="btn btn-secondary" id="refresh-sources">
+                <i class="fas fa-sync-alt"></i> Refresh
+            </button>
+        </div>
+        <div class="table-wrapper">
+            <table class="traffic-table">
+                <thead>
+                    <tr>
+                        <th>Source IP</th>
+                        <th>Protocol</th>
+                        <th>Packets</th>
+                        <th>Data Size</th>
+                        <th>Threat Level</th>
+                    </tr>
+                </thead>
+                <tbody id="top-sources-body">
+                    <!-- Top sources will be populated here -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Packets Table -->
+<div class="traffic-table-container">
+    <div class="chart-header">
+        <div class="chart-title">Recent Packets</div>
+        <div style="display: flex; gap: 10px;">
+            <button class="btn btn-success" id="start-capture">
+                <i class="fas fa-play"></i> Start Capture
+            </button>
+            <button class="btn btn-danger" id="stop-capture">
+                <i class="fas fa-stop"></i> Stop Capture
+            </button>
+            <button class="btn btn-secondary" id="export-data">
+                <i class="fas fa-download"></i> Export
+            </button>
+        </div>
+    </div>
+    <div class="table-wrapper">
+        <table class="traffic-table">
+            <thead>
+                <tr>
+                    <th>Timestamp</th>
+                    <th>Source</th>
+                    <th>Destination</th>
+                    <th>Protocol</th>
+                    <th>Port</th>
+                    <th>Length</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody id="packets-body">
+                <!-- Packets will be populated here -->
+            </tbody>
+        </table>
+    </div>
+    <div class="refresh-info">
+        <i class="fas fa-sync-alt"></i> Auto-refreshing every 5 seconds
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Initialize page
+        initNetworkTrafficPage();
+        
+        // Update data every 5 seconds
+        setInterval(fetchTrafficData, 5000);
+        fetchTrafficData(); // Initial fetch
+    });
+
+    function initNetworkTrafficPage() {
+        // Chart time controls
+        const timeBtns = document.querySelectorAll('.time-btn');
+        timeBtns.forEach(btn => {
+            btn.addEventListener('click', function() {
+                timeBtns.forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                updateTrafficChart(this.dataset.time);
+            });
+        });
+
+        // Protocol filter
+        const protocolSelect = document.getElementById('protocol-select');
+        protocolSelect.addEventListener('change', updateFilters);
+
+        // Time range filter
+        const timeRange = document.getElementById('time-range');
+        timeRange.addEventListener('change', updateFilters);
+
+        // Interface filter
+        const interfaceSelect = document.getElementById('interface-select');
+        interfaceSelect.addEventListener('change', updateFilters);
+
+        // Apply filters button
+        document.getElementById('apply-filters').addEventListener('click', fetchTrafficData);
+
+        // Clear filters button
+        document.getElementById('clear-filters').addEventListener('click', function() {
+            protocolSelect.value = 'all';
+            timeRange.value = '15';
+            interfaceSelect.value = 'wlan0';
+            document.getElementById('active-filters').innerHTML = '';
+            fetchTrafficData();
+        });
+
+        // Control buttons
+        document.getElementById('start-capture').addEventListener('click', startCapture);
+        document.getElementById('stop-capture').addEventListener('click', stopCapture);
+        document.getElementById('export-data').addEventListener('click', exportData);
+        document.getElementById('refresh-sources').addEventListener('click', fetchTopSources);
+
+        // Initialize with sample data
+        populateSampleData();
+    }
+
+    function updateFilters() {
+        const filters = [];
+        const activeFilters = document.getElementById('active-filters');
+        
+        const protocol = document.getElementById('protocol-select').value;
+        if (protocol !== 'all') {
+            filters.push(`Protocol: ${protocol.toUpperCase()}`);
+        }
+        
+        const timeRange = document.getElementById('time-range').value;
+        if (timeRange !== 'custom') {
+            filters.push(`Time: Last ${timeRange} minutes`);
+        }
+        
+        const interface = document.getElementById('interface-select').value;
+        if (interface !== 'wlan0') {
+            filters.push(`Interface: ${interface}`);
+        }
+        
+        // Update active filters display
+        activeFilters.innerHTML = filters.map(filter => `
+            <div class="filter-tag">
+                ${filter}
+                <span class="remove" onclick="removeFilter('${filter.split(': ')[0].toLowerCase()}')">
+                    <i class="fas fa-times"></i>
+                </span>
+            </div>
+        `).join('');
+    }
+
+    function removeFilter(filterType) {
+        switch(filterType) {
+            case 'protocol':
+                document.getElementById('protocol-select').value = 'all';
+                break;
+            case 'time':
+                document.getElementById('time-range').value = '15';
+                break;
+            case 'interface':
+                document.getElementById('interface-select').value = 'wlan0';
+                break;
+        }
+        updateFilters();
+        fetchTrafficData();
+    }
+
+    function fetchTrafficData() {
+        // Simulate API call to fetch traffic data
+        console.log('Fetching traffic data...');
+        
+        // Simulate delay for API call
+        setTimeout(() => {
+            // Update statistics
+            document.getElementById('tcp-count').textContent = formatNumber(1245 + Math.floor(Math.random() * 100));
+            document.getElementById('udp-count').textContent = formatNumber(892 + Math.floor(Math.random() * 50));
+            document.getElementById('icmp-count').textContent = formatNumber(56 + Math.floor(Math.random() * 10));
+            document.getElementById('total-count').textContent = formatNumber(2193 + Math.floor(Math.random() * 150));
+            
+            // Update top sources
+            fetchTopSources();
+            
+            // Update recent packets
+            updateRecentPackets();
+        }, 500);
+    }
+
+    function fetchTopSources() {
+        const topSources = [
+            { ip: '192.168.1.100', protocol: 'TCP', packets: 245, size: '1.2 MB', threat: 'Low' },
+            { ip: '10.0.0.15', protocol: 'UDP', packets: 189, size: '890 KB', threat: 'Medium' },
+            { ip: '172.16.0.5', protocol: 'TCP', packets: 156, size: '780 KB', threat: 'Low' },
+            { ip: '192.168.1.50', protocol: 'ICMP', packets: 89, size: '45 KB', threat: 'High' },
+            { ip: '203.0.113.25', protocol: 'TCP', packets: 67, size: '320 KB', threat: 'Medium' }
+        ];
+        
+        const tableBody = document.getElementById('top-sources-body');
+        tableBody.innerHTML = topSources.map(source => `
+            <tr>
+                <td class="source-ip">${source.ip}</td>
+                <td><span class="protocol-badge protocol-${source.protocol.toLowerCase()}">${source.protocol}</span></td>
+                <td>${source.packets}</td>
+                <td>${source.size}</td>
+                <td>
+                    <span class="threat-badge threat-${source.threat.toLowerCase()}">
+                        ${source.threat}
+                    </span>
+                </td>
+            </tr>
+        `).join('');
+        
+        // Add threat badge styles
+        const style = document.createElement('style');
+        style.textContent = `
+            .threat-badge {
+                padding: 4px 12px;
+                border-radius: 20px;
+                font-size: 0.85rem;
+                font-weight: 500;
+            }
+            .threat-low { background: #d1fae5; color: #065f46; }
+            .threat-medium { background: #fef3c7; color: #92400e; }
+            .threat-high { background: #fee2e2; color: #991b1b; }
+        `;
+        document.head.appendChild(style);
+    }
+
+    function updateRecentPackets() {
+        const protocols = ['TCP', 'UDP', 'ICMP'];
+        const statuses = ['Normal', 'Suspicious', 'Blocked'];
+        
+        // Generate sample packets
+        const packets = Array.from({ length: 10 }, (_, i) => {
+            const protocol = protocols[Math.floor(Math.random() * protocols.length)];
+            const timestamp = new Date(Date.now() - i * 60000).toLocaleTimeString();
+            
+            return {
+                timestamp,
+                src: `192.168.1.${Math.floor(Math.random() * 100) + 100}`,
+                dst: `10.0.0.${Math.floor(Math.random() * 50)}`,
+                protocol,
+                port: protocol === 'ICMP' ? '-' : Math.floor(Math.random() * 65535),
+                length: Math.floor(Math.random() * 1500) + 28,
+                status: statuses[Math.floor(Math.random() * statuses.length)]
+            };
+        });
+        
+        const tableBody = document.getElementById('packets-body');
+        tableBody.innerHTML = packets.map(packet => `
+            <tr>
+                <td style="font-family: 'Courier New', monospace;">${packet.timestamp}</td>
+                <td class="source-ip">${packet.src}</td>
+                <td class="destination-ip">${packet.dst}</td>
+                <td>
+                    <span class="protocol-badge protocol-${packet.protocol.toLowerCase()}">
+                        ${packet.protocol}
+                    </span>
+                </td>
+                <td>${packet.port}</td>
+                <td class="packet-size">${packet.length} B</td>
+                <td>
+                    <span class="status-badge status-${packet.status.toLowerCase()}">
+                        ${packet.status}
+                    </span>
+                </td>
+            </tr>
+        `).join('');
+        
+        // Add status badge styles
+        const style = document.createElement('style');
+        style.textContent = `
+            .status-badge {
+                padding: 4px 12px;
+                border-radius: 20px;
+                font-size: 0.85rem;
+                font-weight: 500;
+            }
+            .status-normal { background: #d1fae5; color: #065f46; }
+            .status-suspicious { background: #fef3c7; color: #92400e; }
+            .status-blocked { background: #fee2e2; color: #991b1b; }
+        `;
+        document.head.appendChild(style);
+    }
+
+    function updateTrafficChart(timeRange) {
+        console.log(`Updating chart for ${timeRange}`);
+        // This would normally fetch chart data based on time range
+        // For now, we'll just update the placeholder
+        const chartDiv = document.getElementById('traffic-chart');
+        chartDiv.innerHTML = `
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%;">
+                <i class="fas fa-chart-line" style="font-size: 3rem; color: #e2e8f0; margin-bottom: 20px;"></i>
+                <p style="color: #94a3b8;">Displaying ${timeRange} of traffic data</p>
+                <p style="color: #cbd5e1; font-size: 0.9rem;">Chart integration with Plotly/Chart.js would go here</p>
+            </div>
+        `;
+    }
+
+    function startCapture() {
+        alert('Starting packet capture...');
+        document.getElementById('start-capture').disabled = true;
+        document.getElementById('stop-capture').disabled = false;
+        // In real implementation, call API to start capture
+    }
+
+    function stopCapture() {
+        alert('Stopping packet capture...');
+        document.getElementById('start-capture').disabled = false;
+        document.getElementById('stop-capture').disabled = true;
+        // In real implementation, call API to stop capture
+    }
+
+    function exportData() {
+        alert('Exporting traffic data...');
+        // In real implementation, generate and download CSV/JSON
+    }
+
+    function populateSampleData() {
+        fetchTopSources();
+        updateRecentPackets();
+        updateTrafficChart('1h');
+    }
+
+    function formatNumber(num) {
+        return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    }
+</script>
+{% endblock %}
