@@ -18,7 +18,7 @@
             </div>
             <div class="alert-actions">
                 <button class="btn btn-alert" id="resume-after-attack">
-                    <i class="fas fa-play"></i> Resume Capture
+                    <i class="fas fa-play"></i> Resume Now
                 </button>
                 <button class="btn btn-alert-outline" id="view-attack-details">
                     <i class="fas fa-info-circle"></i> View Details
@@ -216,6 +216,16 @@
         50% { box-shadow: 0 4px 30px rgba(239, 68, 68, 0.5); }
     }
 
+    /* Attack Countdown Animation */
+    @keyframes attackCountdown {
+        0% { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); }
+        100% { background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%); }
+    }
+
+    .attack-alert.countdown {
+        animation: attackCountdown 1s infinite alternate;
+    }
+
     .alert-content {
         display: flex;
         align-items: center;
@@ -312,6 +322,7 @@
 
     .status-indicator.attacked {
         background: #ef4444;
+        animation: pulse 0.5s infinite;
     }
 
     .status-dot {
@@ -679,6 +690,20 @@
         background: #dc2626;
     }
 
+    .btn-danger:disabled {
+        opacity: 0.7;
+        cursor: not-allowed;
+    }
+
+    .btn-success {
+        background: #10b981;
+        color: white;
+    }
+
+    .btn-success:hover {
+        background: #059669;
+    }
+
     /* Animations */
     @keyframes pulse {
         0%, 100% { opacity: 1; }
@@ -731,6 +756,10 @@
     let refreshInterval = null;
     let isCapturePaused = false;
     let lastAttackData = null;
+    // New variables for attack handling
+    let attackPauseTimeout = null;
+    let isAttackPaused = false;
+    let countdownInterval = null;
 
     // Initialize on page load
     document.addEventListener('DOMContentLoaded', function() {
@@ -744,6 +773,9 @@
         
         // Start auto-refresh
         startAutoRefresh();
+        
+        // Cleanup on page unload
+        setupCleanup();
     });
 
     function setupEventListeners() {
@@ -756,16 +788,18 @@
             }
         });
 
-        // Resume after attack button
+        // Resume after attack button (manual override)
         document.getElementById('resume-after-attack').addEventListener('click', function() {
-            resumeCapture();
-            hideAttackAlert();
+            if (isAttackPaused) {
+                resumeAfterAttack();
+                showToast('Attack pause manually overridden', 'info');
+            }
         });
 
         // View attack details button
         document.getElementById('view-attack-details').addEventListener('click', function() {
             if (lastAttackData) {
-                alert(`Attack Details:\n\nType: ${lastAttackData.type}\nMessage: ${lastAttackData.message}\nTime: ${lastAttackData.timestamp}`);
+                alert(`Attack Details:\n\nType: ${lastAttackData.type}\nMessage: ${lastAttackData.message}\nTime: ${lastAttackData.timestamp}\nSource: ${lastAttackData.source || 'Unknown'}\nDestination: ${lastAttackData.destination || 'Unknown'}\nSeverity: ${lastAttackData.severity || 'High'}`);
             }
         });
 
@@ -811,11 +845,27 @@
         document.addEventListener('visibilitychange', function() {
             if (document.hidden) {
                 console.log('Tab hidden');
+                stopAutoRefresh();
             } else {
                 console.log('Tab visible - refreshing data');
-                if (!isCapturePaused) {
-                    loadRealTimeTraffic();
+                if (!isCapturePaused && isAutoRefresh) {
+                    startAutoRefresh();
+                    loadAllData();
                 }
+            }
+        });
+    }
+
+    function setupCleanup() {
+        window.addEventListener('beforeunload', function() {
+            if (attackPauseTimeout) {
+                clearTimeout(attackPauseTimeout);
+            }
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+            }
+            if (countdownInterval) {
+                clearInterval(countdownInterval);
             }
         });
     }
@@ -844,16 +894,22 @@
     }
 
     function pauseCapture() {
+        // Only allow manual pause if not in attack pause
+        if (isAttackPaused) {
+            showToast('Cannot manually pause during attack pause period', 'warning');
+            return;
+        }
+        
         isCapturePaused = true;
         stopAutoRefresh();
         
         // Update UI
         document.getElementById('manual-pause').innerHTML = '<i class="fas fa-play"></i> Resume Capture';
-        document.getElementById('manual-pause').classList.remove('btn-primary');
+        document.getElementById('manual-pause').classList.remove('btn-primary', 'btn-danger');
         document.getElementById('manual-pause').classList.add('btn-success');
         
         document.getElementById('capture-status-text').textContent = 'PAUSED';
-        document.getElementById('capture-indicator').classList.remove('active');
+        document.getElementById('capture-indicator').classList.remove('active', 'attacked');
         document.getElementById('capture-indicator').classList.add('paused');
         
         document.getElementById('system-capture-state').textContent = 'Paused';
@@ -862,7 +918,41 @@
         showToast('Capture paused', 'warning');
     }
 
+    function pauseCaptureForAttack() {
+        isCapturePaused = true;
+        isAttackPaused = true;
+        stopAutoRefresh();
+        
+        // Update UI for attack pause
+        document.getElementById('manual-pause').innerHTML = '<i class="fas fa-pause"></i> Attack Paused';
+        document.getElementById('manual-pause').classList.remove('btn-primary', 'btn-success');
+        document.getElementById('manual-pause').classList.add('btn-danger');
+        document.getElementById('manual-pause').disabled = true;
+        
+        document.getElementById('capture-status-text').textContent = 'ATTACK DETECTED';
+        document.getElementById('capture-indicator').classList.remove('active', 'paused');
+        document.getElementById('capture-indicator').classList.add('attacked');
+        
+        document.getElementById('system-capture-state').textContent = 'Attack Paused';
+        document.getElementById('system-capture-state').style.color = '#ef4444';
+    }
+
     function resumeCapture() {
+        // Clear attack timeout if exists
+        if (attackPauseTimeout) {
+            clearTimeout(attackPauseTimeout);
+            attackPauseTimeout = null;
+        }
+        
+        // Clear countdown interval if exists
+        if (countdownInterval) {
+            clearInterval(countdownInterval);
+            countdownInterval = null;
+        }
+        
+        // Reset attack pause flag
+        isAttackPaused = false;
+        
         // Send resume request to backend
         fetch('/api/resume-capture', { method: 'POST' })
             .then(response => response.json())
@@ -872,8 +962,9 @@
                     
                     // Update UI
                     document.getElementById('manual-pause').innerHTML = '<i class="fas fa-pause"></i> Pause Capture';
-                    document.getElementById('manual-pause').classList.remove('btn-success');
+                    document.getElementById('manual-pause').classList.remove('btn-success', 'btn-danger');
                     document.getElementById('manual-pause').classList.add('btn-primary');
+                    document.getElementById('manual-pause').disabled = false;
                     
                     document.getElementById('capture-status-text').textContent = 'Capturing...';
                     document.getElementById('capture-indicator').classList.remove('paused', 'attacked');
@@ -900,6 +991,68 @@
             });
     }
 
+    function resumeAfterAttack() {
+        // Clear any existing timeout
+        if (attackPauseTimeout) {
+            clearTimeout(attackPauseTimeout);
+            attackPauseTimeout = null;
+        }
+        
+        // Clear countdown interval
+        if (countdownInterval) {
+            clearInterval(countdownInterval);
+            countdownInterval = null;
+        }
+        
+        // Send resume request to backend
+        fetch('/api/resume-capture', { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    isCapturePaused = false;
+                    isAttackPaused = false;
+                    
+                    // Update UI
+                    document.getElementById('manual-pause').innerHTML = '<i class="fas fa-pause"></i> Pause Capture';
+                    document.getElementById('manual-pause').classList.remove('btn-danger');
+                    document.getElementById('manual-pause').classList.add('btn-primary');
+                    document.getElementById('manual-pause').disabled = false;
+                    
+                    document.getElementById('capture-status-text').textContent = 'Capturing...';
+                    document.getElementById('capture-indicator').classList.remove('paused', 'attacked');
+                    document.getElementById('capture-indicator').classList.add('active');
+                    
+                    document.getElementById('system-capture-state').textContent = 'Active';
+                    document.getElementById('system-capture-state').style.color = '#10b981';
+                    
+                    // Update attack state
+                    document.getElementById('system-attack-state').textContent = 'Recent Attack';
+                    document.getElementById('system-attack-state').style.color = '#f59e0b';
+                    
+                    // Remove countdown animation
+                    const alertBanner = document.getElementById('attack-alert');
+                    alertBanner.classList.remove('countdown');
+                    
+                    // Restart auto-refresh
+                    startAutoRefresh();
+                    
+                    // Load fresh data
+                    loadAllData();
+                    
+                    // Fade out attack alert after 2 seconds
+                    setTimeout(() => {
+                        hideAttackAlert();
+                    }, 2000);
+                    
+                    showToast('Capture resumed after attack detection', 'success');
+                }
+            })
+            .catch(error => {
+                console.error('Error resuming capture:', error);
+                showToast('Error resuming capture', 'error');
+            });
+    }
+
     function showAttackAlert(attackData) {
         lastAttackData = attackData;
         
@@ -907,27 +1060,58 @@
         const alertBanner = document.getElementById('attack-alert');
         document.getElementById('attack-message').textContent = attackData.message;
         alertBanner.style.display = 'block';
+        alertBanner.classList.add('countdown');
         
-        // Pause capture
-        pauseCapture();
+        // Set attack pause flag and pause capture
+        pauseCaptureForAttack();
         
-        // Update status indicator
-        document.getElementById('capture-status-text').textContent = 'ATTACK DETECTED';
-        document.getElementById('capture-indicator').classList.remove('active', 'paused');
-        document.getElementById('capture-indicator').classList.add('attacked');
-        
+        // Update attack state
         document.getElementById('system-attack-state').textContent = 'Under Attack';
         document.getElementById('system-attack-state').style.color = '#ef4444';
         
-        // Play alert sound (optional)
+        // Play alert sound
         playAlertSound();
         
-        showToast('🚨 Attack detected! Capture paused.', 'error');
+        showToast('🚨 Attack detected! Pausing for 5 seconds...', 'error');
+        
+        // Set timeout to auto-resume after 5 seconds
+        if (attackPauseTimeout) {
+            clearTimeout(attackPauseTimeout);
+        }
+        
+        attackPauseTimeout = setTimeout(() => {
+            resumeAfterAttack();
+        }, 5000); // 5 seconds pause
+        
+        // Update attack alert message with countdown
+        startAttackCountdown(5);
+    }
+
+    function startAttackCountdown(seconds) {
+        let remaining = seconds;
+        const attackMessage = document.getElementById('attack-message');
+        const originalMessage = attackMessage.textContent;
+        
+        // Clear any existing countdown
+        if (countdownInterval) {
+            clearInterval(countdownInterval);
+        }
+        
+        countdownInterval = setInterval(() => {
+            if (remaining >= 0) {
+                attackMessage.textContent = `${originalMessage} (Auto-resume in ${remaining}s)`;
+                remaining--;
+            } else {
+                clearInterval(countdownInterval);
+                countdownInterval = null;
+            }
+        }, 1000);
     }
 
     function hideAttackAlert() {
         const alertBanner = document.getElementById('attack-alert');
         alertBanner.style.display = 'none';
+        alertBanner.classList.remove('countdown');
         lastAttackData = null;
     }
 
@@ -976,11 +1160,39 @@
                     document.getElementById('last-updated-time').textContent = 
                         data.last_updated || new Date().toLocaleTimeString();
                     document.getElementById('total-captured').textContent = data.total_captured || 0;
+                    
+                    // Check for new attacks in packets
+                    checkForNewAttacks(data.packets || []);
                 }
             })
             .catch(error => {
                 console.error('Error loading traffic:', error);
             });
+    }
+
+    function checkForNewAttacks(packets) {
+        // Check if any packets have attack status
+        const attackPackets = packets.filter(p => p.status === 'attack');
+        
+        if (attackPackets.length > 0 && !isAttackPaused) {
+            // Get the most recent attack packet
+            const recentAttack = attackPackets[0];
+            
+            // Create attack data object
+            const attackData = {
+                type: recentAttack.protocol || 'Unknown',
+                message: `Attack detected from ${recentAttack.src || 'Unknown'} to ${recentAttack.dst || 'Unknown'}`,
+                timestamp: recentAttack.timestamp || new Date().toLocaleTimeString(),
+                source: recentAttack.src,
+                destination: recentAttack.dst,
+                severity: 'High'
+            };
+            
+            // Only show alert if not already in attack pause
+            if (!isAttackPaused) {
+                showAttackAlert(attackData);
+            }
+        }
     }
 
     function loadTrafficHistory() {
@@ -1001,9 +1213,9 @@
                 if (data.status === 'success') {
                     updateNetworkStatus(data);
                     
-                    // Check if system is paused due to attack
-                    if (data.status === 'under_attack' && !isCapturePaused) {
-                        // Show attack alert with last attack info
+                    // Check if system is under attack
+                    if (data.status === 'under_attack' && !isAttackPaused) {
+                        // Get attack details
                         fetch('/api/attacks')
                             .then(res => res.json())
                             .then(attackData => {
@@ -1168,21 +1380,16 @@
         
         // Update attack state
         if (data.status === 'under_attack') {
-            document.getElementById('system-attack-state').textContent = 'Under Attack';
-            document.getElementById('system-attack-state').style.color = '#ef4444';
+            if (!isAttackPaused) {
+                document.getElementById('system-attack-state').textContent = 'Under Attack';
+                document.getElementById('system-attack-state').style.color = '#ef4444';
+            }
         } else if (data.status === 'warning') {
             document.getElementById('system-attack-state').textContent = 'Warning';
             document.getElementById('system-attack-state').style.color = '#f59e0b';
         } else {
             document.getElementById('system-attack-state').textContent = 'Normal';
             document.getElementById('system-attack-state').style.color = '#10b981';
-        }
-        
-        // Update capture state
-        if (data.capture_status === 'paused' || data.status === 'under_attack') {
-            if (!isCapturePaused) {
-                pauseCapture();
-            }
         }
     }
 
@@ -1200,12 +1407,34 @@
             border-radius: 8px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
             z-index: 1000;
+            animation: slideIn 0.3s ease;
         `;
+        
+        // Add slide in animation
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes slideIn {
+                from { transform: translateX(100%); opacity: 0; }
+                to { transform: translateX(0); opacity: 1; }
+            }
+        `;
+        document.head.appendChild(style);
         
         document.body.appendChild(toast);
         
         setTimeout(() => {
-            document.body.removeChild(toast);
+            toast.style.animation = 'slideOut 0.3s ease';
+            toast.style.transform = 'translateX(100%)';
+            toast.style.opacity = '0';
+            
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    document.body.removeChild(toast);
+                }
+                if (style.parentNode) {
+                    document.head.removeChild(style);
+                }
+            }, 300);
         }, 3000);
     }
 </script>
