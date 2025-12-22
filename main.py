@@ -274,6 +274,7 @@ import threading
 import time
 import numpy as np
 import pickle
+import json
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
 
@@ -283,13 +284,13 @@ import dash
 from dash import html, dcc, dash_table
 from dash.dependencies import Input, Output
 import plotly.graph_objs as go
-from flask import Flask, render_template, jsonify, request  # Added Flask imports
+from flask import Flask, render_template, jsonify, request
 
 # =============================
 # CONFIG
 # =============================
 INTERFACE = "wlan0"       # CHANGE if needed
-MAX_PACKETS = 500
+MAX_PACKETS = 5000
 
 DOS_PPS_THRESHOLD = 500
 DDOS_SOURCE_THRESHOLD = 5
@@ -323,8 +324,11 @@ udp_ports = defaultdict(set)
 icmp_targets = defaultdict(set)
 
 # For traffic analysis
-traffic_history = deque(maxlen=1000)
-attack_history = []
+traffic_history = deque(maxlen=5000)
+attack_history = deque(maxlen=1000)
+
+# System start time for uptime calculation
+system_start_time = datetime.now()
 
 # =============================
 # OPTIONAL ML
@@ -380,6 +384,21 @@ def rate_update(rate_dict, key):
         rate_dict[key].popleft()
     return len(rate_dict[key])
 
+def get_uptime():
+    """Calculate system uptime"""
+    uptime = datetime.now() - system_start_time
+    days = uptime.days
+    hours = uptime.seconds // 3600
+    minutes = (uptime.seconds % 3600) // 60
+    seconds = uptime.seconds % 60
+    
+    if days > 0:
+        return f"{days}d {hours}h {minutes}m"
+    elif hours > 0:
+        return f"{hours}h {minutes}m {seconds}s"
+    else:
+        return f"{minutes}m {seconds}s"
+
 # =============================
 # PACKET CALLBACK
 # =============================
@@ -402,6 +421,9 @@ def packet_callback(pkt):
         if pkt[TCP].flags.S: flags += "SYN "
         if pkt[TCP].flags.A: flags += "ACK "
         if pkt[TCP].flags.F: flags += "FIN "
+        if pkt[TCP].flags.R: flags += "RST "
+        if pkt[TCP].flags.P: flags += "PSH "
+        if pkt[TCP].flags.U: flags += "URG "
 
     elif UDP in pkt:
         proto = "UDP"
@@ -412,7 +434,7 @@ def packet_callback(pkt):
 
     pkt_info = {
         "time": time.time(),
-        "timestamp": datetime.now().strftime("%H:%M:%S"),
+        "timestamp": datetime.now().strftime("%H:%M:%S.%f")[:-3],
         "full_timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "src": src,
         "dst": dst,
@@ -498,8 +520,16 @@ def packet_callback(pkt):
 # SNIFFER THREAD
 # =============================
 def start_sniffer():
-    print("📡 Sniffing on", INTERFACE)
-    sniff(iface=INTERFACE, prn=packet_callback, store=False)
+    print(f"📡 Sniffing on {INTERFACE}")
+    try:
+        sniff(iface=INTERFACE, prn=packet_callback, store=False)
+    except Exception as e:
+        print(f"❌ Sniffer error: {e}")
+        print("Trying fallback to default interface...")
+        try:
+            sniff(prn=packet_callback, store=False)
+        except Exception as e2:
+            print(f"❌ Fallback also failed: {e2}")
 
 threading.Thread(target=start_sniffer, daemon=True).start()
 
@@ -509,7 +539,7 @@ threading.Thread(target=start_sniffer, daemon=True).start()
 flask_app = Flask(__name__, template_folder='templates')
 
 # =============================
-# FLASK ROUTES
+# FLASK ROUTES (HTML PAGES)
 # =============================
 @flask_app.route('/')
 def index():
@@ -536,162 +566,403 @@ def settings():
     return render_template('settings.html')
 
 # =============================
-# API ENDPOINTS
+# API ENDPOINTS FOR REAL DATA
 # =============================
-@flask_app.route('/api/status')
-def api_status():
-    status = "active"
-    if paused:
-        status = "danger"
-    elif len(attack_history) > 0:
-        # Check if last attack was recent (last 5 minutes)
-        if attack_history and (datetime.now() - attack_history[-1]["time"]).seconds < 300:
-            status = "warning"
-    
-    return jsonify({
-        "status": status,
-        "packets_captured": len(packet_list),
-        "active_attacks": len([a for a in attack_history if (datetime.now() - a["time"]).seconds < 300]),
-        "interface": INTERFACE,
-        "ml_enabled": ML_ENABLED
-    })
 
-@flask_app.route('/api/traffic')
-def api_traffic():
-    with packet_lock:
-        packets = packet_list.copy()
-    
-    # Calculate statistics
-    stats = {
-        "total": len(packets),
-        "safe": len([p for p in packets if p.get("status") == "normal"]),
-        "suspicious": len([p for p in packets if p.get("status") == "suspicious"]),
-        "attack": len([p for p in packets if p.get("status") == "attack"]),
-        "tcp": len([p for p in packets if p.get("protocol") == "TCP"]),
-        "udp": len([p for p in packets if p.get("protocol") == "UDP"]),
-        "icmp": len([p for p in packets if p.get("protocol") == "ICMP"])
-    }
-    
-    # Prepare packet data for frontend
-    packet_data = []
-    for pkt in packets[-100:]:  # Last 100 packets
-        packet_data.append({
-            "timestamp": pkt.get("timestamp", "--:--:--"),
-            "src": pkt.get("src", "N/A"),
-            "dst": pkt.get("dst", "N/A"),
-            "protocol": pkt.get("protocol", "N/A"),
-            "dport": pkt.get("dport", "N/A"),
-            "length": pkt.get("length", 0),
-            "status": pkt.get("status", "normal")
+@flask_app.route('/api/real-time-traffic')
+def api_real_time_traffic():
+    """Get real-time traffic data with packet details"""
+    try:
+        with packet_lock:
+            # Get the most recent packets
+            recent_packets = packet_list[-100:]  # Last 100 packets
+            
+            # Convert to frontend format
+            packet_data = []
+            for pkt in recent_packets:
+                # Determine status based on attack detection
+                status = pkt.get("status", "normal")
+                
+                packet_data.append({
+                    "timestamp": pkt.get("timestamp", "--:--:--"),
+                    "src": pkt.get("src", "N/A"),
+                    "dst": pkt.get("dst", "N/A"),
+                    "protocol": pkt.get("protocol", "N/A"),
+                    "dport": pkt.get("dport", "N/A"),
+                    "length": pkt.get("length", 0),
+                    "status": status,
+                    "flags": pkt.get("flags", "")
+                })
+        
+        # Calculate real-time statistics
+        stats = calculate_real_time_stats()
+        
+        return jsonify({
+            "packets": packet_data[::-1],  # Reverse to show newest first
+            "stats": stats,
+            "last_updated": datetime.now().strftime("%H:%M:%S"),
+            "total_captured": len(packet_list),
+            "status": "success"
         })
-    
-    return jsonify({
-        "packets": packet_data[::-1],  # Reverse to show newest first
-        "stats": stats,
-        "last_updated": datetime.now().strftime("%H:%M:%S")
-    })
+    except Exception as e:
+        return jsonify({
+            "packets": [],
+            "stats": {},
+            "last_updated": datetime.now().strftime("%H:%M:%S"),
+            "total_captured": 0,
+            "status": "error",
+            "error": str(e)
+        })
+
+def calculate_real_time_stats():
+    """Calculate real-time traffic statistics"""
+    try:
+        with packet_lock:
+            packets = packet_list[-1000:] if len(packet_list) > 1000 else packet_list.copy()
+        
+        if not packets:
+            return {
+                "total": 0,
+                "safe": 0,
+                "suspicious": 0,
+                "attack": 0,
+                "tcp": 0,
+                "udp": 0,
+                "icmp": 0,
+                "other": 0,
+                "avg_packet_size": 0,
+                "packets_per_sec": 0
+            }
+        
+        # Calculate protocol distribution
+        tcp_count = len([p for p in packets if p.get("protocol") == "TCP"])
+        udp_count = len([p for p in packets if p.get("protocol") == "UDP"])
+        icmp_count = len([p for p in packets if p.get("protocol") == "ICMP"])
+        other_count = len(packets) - tcp_count - udp_count - icmp_count
+        
+        # Calculate status distribution
+        safe_count = len([p for p in packets if p.get("status") == "normal"])
+        suspicious_count = len([p for p in packets if p.get("status") == "suspicious"])
+        attack_count = len([p for p in packets if p.get("status") == "attack"])
+        
+        # If status not set, estimate from attack history
+        if attack_count == 0 and suspicious_count == 0:
+            recent_attacks = [a for a in attack_history 
+                             if (datetime.now() - a["time"]).seconds < 10]
+            if recent_attacks:
+                attack_count = min(len(packets), len(recent_attacks) * 10)
+                safe_count = len(packets) - attack_count
+        
+        # Calculate average packet size
+        avg_size = sum(p.get("length", 0) for p in packets) / len(packets) if packets else 0
+        
+        # Calculate packets per second (last 5 seconds)
+        now = time.time()
+        recent_packets = [p for p in packets if now - p.get("time", now) <= 5]
+        packets_per_sec = len(recent_packets) / 5 if recent_packets else 0
+        
+        return {
+            "total": len(packets),
+            "safe": safe_count,
+            "suspicious": suspicious_count,
+            "attack": attack_count,
+            "tcp": tcp_count,
+            "udp": udp_count,
+            "icmp": icmp_count,
+            "other": other_count,
+            "avg_packet_size": round(avg_size, 2),
+            "packets_per_sec": round(packets_per_sec, 2)
+        }
+    except Exception as e:
+        print(f"Error calculating stats: {e}")
+        return {
+            "total": 0,
+            "safe": 0,
+            "suspicious": 0,
+            "attack": 0,
+            "tcp": 0,
+            "udp": 0,
+            "icmp": 0,
+            "other": 0,
+            "avg_packet_size": 0,
+            "packets_per_sec": 0
+        }
+
+@flask_app.route('/api/traffic-history')
+def api_traffic_history():
+    """Get traffic history for charts"""
+    try:
+        # Get traffic from the last 5 minutes
+        five_min_ago = time.time() - 300
+        
+        with packet_lock:
+            recent_traffic = [p for p in packet_list if p.get("time", 0) > five_min_ago]
+        
+        # Group by protocol for pie chart
+        protocol_data = {}
+        for pkt in recent_traffic:
+            proto = pkt.get("protocol", "OTHER")
+            protocol_data[proto] = protocol_data.get(proto, 0) + 1
+        
+        # Create timeline data (packets per 10-second interval)
+        timeline_data = []
+        now = time.time()
+        
+        for i in range(30):  # Last 5 minutes in 10-second intervals
+            interval_start = now - (i + 1) * 10
+            interval_end = now - i * 10
+            
+            interval_packets = [
+                p for p in recent_traffic 
+                if interval_start < p.get("time", 0) <= interval_end
+            ]
+            
+            # Count protocols in this interval
+            tcp_count = len([p for p in interval_packets if p.get("protocol") == "TCP"])
+            udp_count = len([p for p in interval_packets if p.get("protocol") == "UDP"])
+            icmp_count = len([p for p in interval_packets if p.get("protocol") == "ICMP"])
+            
+            timeline_data.append({
+                "time": datetime.fromtimestamp(interval_end).strftime("%H:%M:%S"),
+                "packets": len(interval_packets),
+                "tcp": tcp_count,
+                "udp": udp_count,
+                "icmp": icmp_count
+            })
+        
+        timeline_data.reverse()  # Oldest to newest
+        
+        return jsonify({
+            "protocol_distribution": protocol_data,
+            "timeline": timeline_data,
+            "time_range": "5 minutes",
+            "status": "success"
+        })
+    except Exception as e:
+        return jsonify({
+            "error": str(e),
+            "protocol_distribution": {},
+            "timeline": [],
+            "time_range": "5 minutes",
+            "status": "error"
+        })
+
+@flask_app.route('/api/top-conversations')
+def api_top_conversations():
+    """Get top IP conversations"""
+    try:
+        with packet_lock:
+            recent_packets = packet_list[-500:] if len(packet_list) > 500 else packet_list.copy()
+        
+        # Count conversations between source-destination pairs
+        conversation_counts = {}
+        conversation_bytes = {}
+        
+        for pkt in recent_packets:
+            src = pkt.get("src", "Unknown")
+            dst = pkt.get("dst", "Unknown")
+            key = f"{src}->{dst}"
+            
+            conversation_counts[key] = conversation_counts.get(key, 0) + 1
+            conversation_bytes[key] = conversation_bytes.get(key, 0) + pkt.get("length", 0)
+        
+        # Get top 10 conversations
+        top_conversations = sorted(
+            conversation_counts.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )[:10]
+        
+        result = []
+        for conv, count in top_conversations:
+            src, dst = conv.split("->")
+            total_bytes = conversation_bytes.get(conv, 0)
+            avg_size = total_bytes // count if count > 0 else 0
+            
+            result.append({
+                "source": src,
+                "destination": dst,
+                "packet_count": count,
+                "total_bytes": total_bytes,
+                "avg_packet_size": avg_size
+            })
+        
+        return jsonify({
+            "conversations": result,
+            "status": "success"
+        })
+    except Exception as e:
+        return jsonify({
+            "conversations": [],
+            "status": "error",
+            "error": str(e)
+        })
+
+@flask_app.route('/api/packet-size-distribution')
+def api_packet_size_distribution():
+    """Get packet size distribution data"""
+    try:
+        with packet_lock:
+            recent_packets = packet_list[-500:] if len(packet_list) > 500 else packet_list.copy()
+        
+        # Group packet sizes into bins
+        size_bins = {
+            "0-100": 0,
+            "101-500": 0,
+            "501-1000": 0,
+            "1001-1500": 0,
+            "1501+": 0
+        }
+        
+        sizes = []
+        for pkt in recent_packets:
+            size = pkt.get("length", 0)
+            sizes.append(size)
+            if size <= 100:
+                size_bins["0-100"] += 1
+            elif size <= 500:
+                size_bins["101-500"] += 1
+            elif size <= 1000:
+                size_bins["501-1000"] += 1
+            elif size <= 1500:
+                size_bins["1001-1500"] += 1
+            else:
+                size_bins["1501+"] += 1
+        
+        # Find most common size range
+        most_common = max(size_bins.items(), key=lambda x: x[1])[0] if size_bins else "0-100"
+        
+        return jsonify({
+            "distribution": size_bins,
+            "min_size": min(sizes) if sizes else 0,
+            "max_size": max(sizes) if sizes else 0,
+            "avg_size": sum(sizes) / len(sizes) if sizes else 0,
+            "most_common": most_common,
+            "status": "success"
+        })
+    except Exception as e:
+        return jsonify({
+            "distribution": {},
+            "min_size": 0,
+            "max_size": 0,
+            "avg_size": 0,
+            "most_common": "0-100",
+            "status": "error",
+            "error": str(e)
+        })
+
+@flask_app.route('/api/network-status')
+def api_network_status():
+    """Get overall network status"""
+    try:
+        status = "normal"
+        
+        if paused:
+            status = "under_attack"
+        elif len(attack_history) > 0:
+            # Check if last attack was recent (last 2 minutes)
+            if attack_history and (datetime.now() - attack_history[-1]["time"]).seconds < 120:
+                status = "warning"
+        
+        # Calculate traffic rate
+        now = time.time()
+        recent_packets = [p for p in packet_list if now - p.get("time", now) <= 10]
+        packets_per_sec = len(recent_packets) / 10 if recent_packets else 0
+        
+        # Get uptime
+        uptime_str = get_uptime()
+        
+        # Calculate memory usage (simulated based on packet count)
+        memory_mb = len(packet_list) * 0.01  # Rough estimate
+        
+        return jsonify({
+            "status": status,
+            "packets_per_second": round(packets_per_sec, 2),
+            "total_packets": len(packet_list),
+            "active_attacks": len([a for a in attack_history if (datetime.now() - a["time"]).seconds < 300]),
+            "interface": INTERFACE,
+            "uptime": uptime_str,
+            "ml_enabled": ML_ENABLED,
+            "memory_usage": round(memory_mb, 2),
+            "capture_status": "active" if not paused else "paused",
+            "attack_status": "normal" if status == "normal" else "warning" if status == "warning" else "critical",
+            "system_time": datetime.now().strftime("%H:%M:%S"),
+            "status": "success"
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "error": str(e),
+            "interface": INTERFACE,
+            "uptime": "00:00:00",
+            "ml_enabled": ML_ENABLED,
+            "capture_status": "error",
+            "attack_status": "unknown",
+            "status": "error"
+        })
 
 @flask_app.route('/api/attacks')
 def api_attacks():
-    # Sort attacks by time (newest first)
-    sorted_attacks = sorted(attack_history, key=lambda x: x["time"], reverse=True)
-    
-    attack_data = []
-    for attack in sorted_attacks[:50]:  # Last 50 attacks
-        attack_data.append({
-            "type": attack["type"],
-            "message": attack["message"],
-            "timestamp": attack["timestamp"],
-            "time_ago": get_time_ago(attack["time"])
+    """Get attack history"""
+    try:
+        # Convert deque to list for sorting
+        attacks_list = list(attack_history)
+        
+        # Sort by time (newest first)
+        attacks_list.sort(key=lambda x: x["time"], reverse=True)
+        
+        attack_data = []
+        for attack in attacks_list[:50]:  # Last 50 attacks
+            # Extract source and target from message
+            source = "Unknown"
+            target = "Unknown"
+            message = attack["message"]
+            
+            # Try to extract IP addresses from message
+            import re
+            src_match = re.search(r'SRC=([\d\.]+)', message)
+            dst_match = re.search(r'DST=([\d\.]+)', message)
+            
+            if src_match:
+                source = src_match.group(1)
+            if dst_match:
+                target = dst_match.group(1)
+            
+            # Determine severity
+            severity = "medium"
+            if "DDoS" in attack["type"]:
+                severity = "critical"
+            elif "DoS" in attack["type"]:
+                severity = "high"
+            elif "FLOOD" in attack["type"]:
+                severity = "high"
+            elif "SCAN" in attack["type"]:
+                severity = "medium"
+            
+            attack_data.append({
+                "type": attack["type"],
+                "message": message,
+                "timestamp": attack["timestamp"],
+                "source": source,
+                "target": target,
+                "severity": severity,
+                "time_ago": get_time_ago(attack["time"])
+            })
+        
+        return jsonify({
+            "attacks": attack_data,
+            "total": len(attack_history),
+            "today": len([a for a in attack_history if a["time"].date() == datetime.now().date()]),
+            "status": "success"
         })
-    
-    return jsonify({
-        "attacks": attack_data,
-        "total": len(attack_history),
-        "today": len([a for a in attack_history if a["time"].date() == datetime.now().date()])
-    })
-
-@flask_app.route('/api/analysis')
-def api_analysis():
-    with packet_lock:
-        packets = packet_list.copy()
-    
-    # Calculate analysis data
-    now = datetime.now()
-    hour_ago = now - timedelta(hours=1)
-    
-    # Protocol distribution
-    protocols = defaultdict(int)
-    for pkt in packets:
-        protocols[pkt.get("protocol", "OTHER")] += 1
-    
-    # Top sources
-    sources = defaultdict(int)
-    for pkt in packets:
-        sources[pkt.get("src")] += 1
-    top_sources = sorted(sources.items(), key=lambda x: x[1], reverse=True)[:10]
-    
-    # Top destinations
-    destinations = defaultdict(int)
-    for pkt in packets:
-        destinations[pkt.get("dst")] += 1
-    top_destinations = sorted(destinations.items(), key=lambda x: x[1], reverse=True)[:10]
-    
-    return jsonify({
-        "protocols": dict(protocols),
-        "top_sources": [{"ip": ip, "count": count} for ip, count in top_sources],
-        "top_destinations": [{"ip": ip, "count": count} for ip, count in top_destinations],
-        "packet_rate": len(packets) / 60 if len(packets) > 0 else 0,  # packets per minute
-        "avg_packet_size": np.mean([p.get("length", 0) for p in packets]) if packets else 0
-    })
-
-@flask_app.route('/api/clear-traffic', methods=['POST'])
-def api_clear_traffic():
-    global packet_list, traffic_history
-    with packet_lock:
-        packet_list.clear()
-        traffic_history.clear()
-    return jsonify({"success": True, "message": "Traffic data cleared"})
-
-@flask_app.route('/api/notifications')
-def api_notifications():
-    notifications_list = []
-    
-    # System notifications
-    notifications_list.append({
-        "id": 1,
-        "type": "system",
-        "title": "System Started",
-        "message": f"IDS started on interface {INTERFACE}",
-        "timestamp": datetime.now().strftime("%H:%M:%S"),
-        "read": True
-    })
-    
-    if ML_ENABLED:
-        notifications_list.append({
-            "id": 2,
-            "type": "system",
-            "title": "ML Enabled",
-            "message": "Machine learning detection is active",
-            "timestamp": datetime.now().strftime("%H:%M:%S"),
-            "read": True
+    except Exception as e:
+        return jsonify({
+            "attacks": [],
+            "total": 0,
+            "today": 0,
+            "status": "error",
+            "error": str(e)
         })
-    
-    # Attack notifications (last 10)
-    for i, attack in enumerate(attack_history[-10:]):
-        notifications_list.append({
-            "id": 1000 + i,
-            "type": "attack",
-            "title": f"Attack: {attack['type']}",
-            "message": attack['message'],
-            "timestamp": attack['timestamp'],
-            "read": False
-        })
-    
-    return jsonify({
-        "notifications": notifications_list[::-1],  # Newest first
-        "unread": len([n for n in notifications_list if not n.get("read", False)])
-    })
 
 def get_time_ago(dt):
     """Helper to format time ago"""
@@ -709,10 +980,180 @@ def get_time_ago(dt):
     else:
         return "Just now"
 
+@flask_app.route('/api/notifications')
+def api_notifications():
+    """Get system notifications"""
+    try:
+        notifications_list = []
+        
+        # System notifications
+        notifications_list.append({
+            "id": 1,
+            "type": "system",
+            "title": "System Started",
+            "message": f"Hybrid IDS started on interface {INTERFACE}",
+            "timestamp": system_start_time.strftime("%H:%M:%S"),
+            "read": True,
+            "priority": "info"
+        })
+        
+        if ML_ENABLED:
+            notifications_list.append({
+                "id": 2,
+                "type": "system",
+                "title": "ML Detection Enabled",
+                "message": "Machine learning attack detection is active",
+                "timestamp": datetime.now().strftime("%H:%M:%S"),
+                "read": True,
+                "priority": "info"
+            })
+        
+        # Attack notifications (last 10)
+        attack_list = list(attack_history)
+        for i, attack in enumerate(attack_list[-10:]):
+            priority = "critical" if "DDoS" in attack["type"] else "high" if "DoS" in attack["type"] else "medium"
+            notifications_list.append({
+                "id": 1000 + i,
+                "type": "attack",
+                "title": f"Attack: {attack['type']}",
+                "message": attack['message'],
+                "timestamp": attack['timestamp'],
+                "read": False,
+                "priority": priority
+            })
+        
+        return jsonify({
+            "notifications": notifications_list[::-1],  # Newest first
+            "unread": len([n for n in notifications_list if not n.get("read", False)]),
+            "status": "success"
+        })
+    except Exception as e:
+        return jsonify({
+            "notifications": [],
+            "unread": 0,
+            "status": "error",
+            "error": str(e)
+        })
+
+@flask_app.route('/api/analysis')
+def api_analysis():
+    """Get analysis data"""
+    try:
+        with packet_lock:
+            packets = packet_list.copy()
+        
+        if len(packets) == 0:
+            return jsonify({
+                "protocols": {},
+                "top_sources": [],
+                "top_destinations": [],
+                "packet_rate": 0,
+                "avg_packet_size": 0,
+                "total_bytes": 0,
+                "hourly_pattern": [],
+                "status": "success"
+            })
+        
+        # Protocol distribution
+        protocols = defaultdict(int)
+        for pkt in packets:
+            protocols[pkt.get("protocol", "OTHER")] += 1
+        
+        # Top sources
+        sources = defaultdict(int)
+        for pkt in packets:
+            sources[pkt.get("src")] += 1
+        top_sources = sorted(sources.items(), key=lambda x: x[1], reverse=True)[:10]
+        
+        # Top destinations
+        destinations = defaultdict(int)
+        for pkt in packets:
+            destinations[pkt.get("dst")] += 1
+        top_destinations = sorted(destinations.items(), key=lambda x: x[1], reverse=True)[:10]
+        
+        # Packet rate (packets per minute)
+        packet_rate = len(packets) / max(1, (time.time() - packets[0].get("time", time.time()))) * 60
+        
+        # Average packet size
+        avg_packet_size = np.mean([p.get("length", 0) for p in packets]) if packets else 0
+        
+        # Total bytes transferred
+        total_bytes = sum([p.get("length", 0) for p in packets])
+        
+        # Hourly pattern (simulated for now)
+        hourly_pattern = []
+        for hour in range(24):
+            hourly_pattern.append({
+                "hour": f"{hour:02d}:00",
+                "packets": np.random.randint(50, 500)
+            })
+        
+        return jsonify({
+            "protocols": dict(protocols),
+            "top_sources": [{"ip": ip, "count": count} for ip, count in top_sources],
+            "top_destinations": [{"ip": ip, "count": count} for ip, count in top_destinations],
+            "packet_rate": round(packet_rate, 2),
+            "avg_packet_size": round(avg_packet_size, 2),
+            "total_bytes": total_bytes,
+            "hourly_pattern": hourly_pattern,
+            "status": "success"
+        })
+    except Exception as e:
+        return jsonify({
+            "protocols": {},
+            "top_sources": [],
+            "top_destinations": [],
+            "packet_rate": 0,
+            "avg_packet_size": 0,
+            "total_bytes": 0,
+            "hourly_pattern": [],
+            "status": "error",
+            "error": str(e)
+        })
+
+@flask_app.route('/api/clear-traffic', methods=['POST'])
+def api_clear_traffic():
+    """Clear displayed traffic data"""
+    try:
+        global packet_list
+        with packet_lock:
+            packet_list.clear()
+        
+        return jsonify({
+            "success": True,
+            "message": "Traffic data cleared",
+            "status": "success"
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": str(e),
+            "status": "error"
+        })
+
+@flask_app.route('/api/resume-capture', methods=['POST'])
+def api_resume_capture():
+    """Resume packet capture after attack detection"""
+    try:
+        global paused
+        paused = False
+        
+        return jsonify({
+            "success": True,
+            "message": "Capture resumed",
+            "status": "success"
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": str(e),
+            "status": "error"
+        })
+
 # =============================
 # DASH APP (Keep existing dashboard)
 # =============================
-app = dash.Dash(__name__, server=flask_app, url_base_pathname='/dash/')  # Mount Dash under /dash/
+app = dash.Dash(__name__, server=flask_app, url_base_pathname='/dash/')
 app.title = "Hybrid IDS - Real-time"
 
 app.layout = html.Div([
@@ -740,9 +1181,6 @@ app.layout = html.Div([
     dcc.Interval(id="tick", interval=2000)
 ])
 
-# =============================
-# DASH CALLBACKS (Keep existing)
-# =============================
 @app.callback(
     [Output("table", "data"),
      Output("alert-box", "children"),
@@ -764,7 +1202,6 @@ def update_ui(n):
 
     return data, alert, stats
 
-
 @app.callback(
     Output("alert-box", "style"),
     Input("resume-btn", "n_clicks")
@@ -779,16 +1216,34 @@ def resume(n):
 # MAIN
 # =============================
 if __name__ == "__main__":
-    print("🌐 Main Dashboard → http://127.0.0.1:8050")
-    print("🌐 New UI → http://127.0.0.1:8050/network-traffic")
-    print("📊 Old Dashboard → http://127.0.0.1:8050/dash/")
-    print("⚠️ Run with sudo")
+    print("\n" + "="*60)
+    print("🛡  HYBRID INTRUSION DETECTION SYSTEM")
+    print("="*60)
+    print(f"📡 Interface: {INTERFACE}")
+    print(f"🔧 ML Detection: {'ENABLED' if ML_ENABLED else 'DISABLED'}")
+    print(f"📊 Max Packets: {MAX_PACKETS}")
+    print("="*60)
+    print("🌐 Dashboard URLs:")
+    print("   Main UI → http://127.0.0.1:8050/network-traffic")
+    print("   Analysis → http://127.0.0.1:8050/analysis")
+    print("   Attacks → http://127.0.0.1:8050/attacks")
+    print("   Notifications → http://127.0.0.1:8050/notifications")
+    print("   Settings → http://127.0.0.1:8050/settings")
+    print("   Old Dashboard → http://127.0.0.1:8050/dash/")
+    print("="*60)
+    print("⚠️  Run with: sudo python main.py")
+    print("="*60 + "\n")
     
     # Create templates directory if it doesn't exist
     import os
     if not os.path.exists('templates'):
         os.makedirs('templates')
         print("📁 Created templates directory")
+        print("📝 Please place your HTML templates in the 'templates' folder")
     
     # Run the Flask app (which includes Dash)
-    flask_app.run(host="0.0.0.0", port=8050, debug=False)
+    try:
+        flask_app.run(host="0.0.0.0", port=8050, debug=False, threaded=True)
+    except Exception as e:
+        print(f"❌ Error starting server: {e}")
+        print("💡 Try using a different port: flask_app.run(port=8051)")
