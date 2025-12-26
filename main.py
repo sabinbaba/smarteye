@@ -555,9 +555,12 @@ auth.init_app(flask_app)
 # FLASK ROUTES (HTML PAGES)
 # =============================
 @flask_app.route('/')
-@auth.login_required
 def index():
-    return render_template('base.html')
+    """Start on login page - redirect to login if not authenticated"""
+    if auth.is_authenticated():
+        # Redirect authenticated users to the main dashboard
+        return redirect(url_for('network_traffic'))
+    return render_template('login.html')
 
 @flask_app.route('/network-traffic')
 @auth.login_required
@@ -611,7 +614,8 @@ def login_post():
     if success:
         flash(message, 'success')
         next_page = request.args.get('next')
-        return redirect(next_page) if next_page else redirect(url_for('index'))
+        # Redirect to network-traffic dashboard after successful login
+        return redirect(next_page) if next_page else redirect(url_for('network_traffic'))
     else:
         flash(message, 'danger')
         return redirect(url_for('login'))
@@ -635,6 +639,7 @@ def register_post():
     success, message = auth.register_user(username, email, password, confirm_password, full_name)
     if success:
         flash(message, 'success')
+        # Users need to login after registration, so redirect to login page
         return redirect(url_for('login'))
     else:
         if isinstance(message, list):
@@ -646,7 +651,7 @@ def register_post():
 
 @flask_app.route('/logout')
 def logout():
-    """Logout user"""
+    """Logout user and redirect to login page"""
     auth.logout_user()
     flash('You have been logged out successfully.', 'info')
     return redirect(url_for('login'))
