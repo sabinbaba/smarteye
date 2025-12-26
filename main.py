@@ -542,6 +542,15 @@ threading.Thread(target=start_sniffer, daemon=True).start()
 # =============================
 flask_app = Flask(__name__, template_folder='templates')
 
+# Configure Flask app
+flask_app.config['SECRET_KEY'] = 'hybrid-ids-secret-key-change-in-production-2024'
+flask_app.config['SESSION_TYPE'] = 'filesystem'
+flask_app.config['SESSION_PERMANENT'] = True
+flask_app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
+
+# Initialize auth manager with Flask app
+auth.init_app(flask_app)
+
 # =============================
 # FLASK ROUTES (HTML PAGES)
 # =============================
@@ -571,8 +580,9 @@ def notifications():
     return render_template('notifications.html')
 
 @flask_app.route('/settings')
-@auth.login_required
+@auth.admin_required
 def settings():
+    """Admin-only settings page"""
     return render_template('settings.html')
 
 # =============================
@@ -1316,12 +1326,12 @@ if __name__ == "__main__":
     print(f"📊 Max Packets: {MAX_PACKETS}")
     print("="*60)
     print("🌐 Dashboard URLs:")
-    print("   Main UI → http://127.0.0.1:8050/network-traffic")
-    print("   Analysis → http://127.0.0.1:8050/analysis")
-    print("   Attacks → http://127.0.0.1:8050/attacks")
-    print("   Notifications → http://127.0.0.1:8050/notifications")
-    print("   Settings → http://127.0.0.1:8050/settings")
-    print("   Old Dashboard → http://127.0.0.1:8050/dash/")
+    print("   Main UI → http://127.0.0.1:8090/network-traffic")
+    print("   Analysis → http://127.0.0.1:8090/analysis")
+    print("   Attacks → http://127.0.0.1:8090/attacks")
+    print("   Notifications → http://127.0.0.1:8090/notifications")
+    print("   Settings → http://127.0.0.1:8090/settings")
+    print("   Old Dashboard → http://127.0.0.1:8090/dash/")
     print("="*60)
     print("⚠️  Run with: sudo python main.py")
     print("="*60 + "\n")
@@ -1335,7 +1345,7 @@ if __name__ == "__main__":
     
     # Run the Flask app (which includes Dash)
     try:
-        flask_app.run(host="0.0.0.0", port=8050, debug=False, threaded=True)
+        flask_app.run(host="0.0.0.0", port=8090, debug=False, threaded=True)
     except Exception as e:
         print(f"❌ Error starting server: {e}")
-        print("💡 Try using a different port: flask_app.run(port=8051)")
+        print("💡 Try using a different port: flask_app.run(port=8091)")

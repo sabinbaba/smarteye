@@ -27,6 +27,15 @@
         </div>
     </div>
 
+    <!-- Background Monitoring Status -->
+    <div class="background-status" id="background-status" style="display: none;">
+        <div class="status-content">
+            <i class="fas fa-satellite-dish"></i>
+            <span>Background monitoring active</span>
+            <small id="background-update-time"></small>
+        </div>
+    </div>
+
     <!-- Traffic Stats Cards -->
     <div class="stats-grid">
         <div class="stat-card">
@@ -90,6 +99,9 @@
             <button class="btn btn-secondary" id="refresh-traffic">
                 <i class="fas fa-sync-alt"></i> Refresh
             </button>
+            <button class="btn btn-info" id="background-toggle" title="Toggle background monitoring">
+                <i class="fas fa-satellite-dish"></i>
+            </button>
         </div>
     </div>
 
@@ -104,6 +116,13 @@
                         <span class="slider"></span>
                     </label>
                     <span>Auto-refresh</span>
+                </div>
+                <div class="background-control" style="margin-left: 15px;">
+                    <label class="switch">
+                        <input type="checkbox" id="background-monitor-toggle" checked>
+                        <span class="slider"></span>
+                    </label>
+                    <span>Background Monitor</span>
                 </div>
             </div>
         </div>
@@ -181,8 +200,8 @@
                     <span class="status-value" id="system-attack-state">Normal</span>
                 </div>
                 <div class="status-item">
-                    <span class="status-label">ML Engine:</span>
-                    <span class="status-value" id="system-ml-state">Disabled</span>
+                    <span class="status-label">Background Monitor:</span>
+                    <span class="status-value" id="system-background-state">Active</span>
                 </div>
                 <div class="status-item">
                     <span class="status-label">Uptime:</span>
@@ -214,6 +233,38 @@
     @keyframes pulseAlert {
         0%, 100% { box-shadow: 0 4px 20px rgba(239, 68, 68, 0.3); }
         50% { box-shadow: 0 4px 30px rgba(239, 68, 68, 0.5); }
+    }
+
+    /* Background Status */
+    .background-status {
+        background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+        color: white;
+        border-radius: 8px;
+        padding: 10px 20px;
+        margin-bottom: 15px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 0.9rem;
+        animation: slideDown 0.3s ease;
+    }
+
+    @keyframes slideDown {
+        from { transform: translateY(-20px); opacity: 0; }
+        to { transform: translateY(0); opacity: 1; }
+    }
+
+    .background-status .status-content {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+    }
+
+    .background-status small {
+        opacity: 0.8;
+        margin-left: auto;
+        font-size: 0.8rem;
     }
 
     /* Attack Countdown Animation */
@@ -437,7 +488,13 @@
         gap: 10px;
     }
 
-    .auto-refresh-control {
+    .table-controls {
+        display: flex;
+        align-items: center;
+        gap: 20px;
+    }
+
+    .auto-refresh-control, .background-control {
         display: flex;
         align-items: center;
         gap: 10px;
@@ -704,6 +761,16 @@
         background: #059669;
     }
 
+    .btn-info {
+        background: #3b82f6;
+        color: white;
+        padding: 10px 15px;
+    }
+
+    .btn-info:hover {
+        background: #2563eb;
+    }
+
     /* Animations */
     @keyframes pulse {
         0%, 100% { opacity: 1; }
@@ -742,6 +809,12 @@
             gap: 15px;
             align-items: flex-start;
         }
+        
+        .table-controls {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 10px;
+        }
     }
 </style>
 
@@ -756,14 +829,23 @@
     let refreshInterval = null;
     let isCapturePaused = false;
     let lastAttackData = null;
-    // New variables for attack handling
+    
+    // Background monitoring variables
     let attackPauseTimeout = null;
     let isAttackPaused = false;
     let countdownInterval = null;
+    let backgroundCheckInterval = null;
+    let isBackgroundMonitoring = true;
+    let lastBackgroundUpdate = null;
+    let backgroundWorker = null;
+    let missedAttacks = [];
 
     // Initialize on page load
     document.addEventListener('DOMContentLoaded', function() {
         console.log('Network Traffic page loaded');
+        
+        // Request notification permission
+        requestNotificationPermission();
         
         // Load initial data
         loadAllData();
@@ -773,6 +855,15 @@
         
         // Start auto-refresh
         startAutoRefresh();
+        
+        // Start background worker
+        startBackgroundWorker();
+        
+        // Setup visibility change handler
+        setupVisibilityHandler();
+        
+        // Check for missed attacks from other tabs
+        checkMissedAttacks();
         
         // Cleanup on page unload
         setupCleanup();
@@ -815,6 +906,29 @@
             }
         });
 
+        // Background monitor toggle
+        document.getElementById('background-monitor-toggle').addEventListener('change', function() {
+            isBackgroundMonitoring = this.checked;
+            if (isBackgroundMonitoring) {
+                startBackgroundWorker();
+                showToast('Background monitoring enabled', 'success');
+                document.getElementById('system-background-state').textContent = 'Active';
+                document.getElementById('system-background-state').style.color = '#10b981';
+            } else {
+                stopBackgroundWorker();
+                showToast('Background monitoring disabled', 'warning');
+                document.getElementById('system-background-state').textContent = 'Disabled';
+                document.getElementById('system-background-state').style.color = '#64748b';
+            }
+        });
+
+        // Background toggle button
+        document.getElementById('background-toggle').addEventListener('click', function() {
+            const toggle = document.getElementById('background-monitor-toggle');
+            toggle.checked = !toggle.checked;
+            toggle.dispatchEvent(new Event('change'));
+        });
+
         // Refresh button
         document.getElementById('refresh-traffic').addEventListener('click', function() {
             if (!isCapturePaused) {
@@ -840,18 +954,46 @@
                 updateTrafficTable();
             }
         });
+    }
 
-        // Handle tab visibility
+    function setupVisibilityHandler() {
         document.addEventListener('visibilitychange', function() {
             if (document.hidden) {
-                console.log('Tab hidden');
+                console.log('Page hidden - switching to background mode');
+                
+                // Show background status
+                showBackgroundStatus();
+                
+                // Stop regular polling but keep background checks
                 stopAutoRefresh();
+                
+                // Start slower background polling if enabled
+                if (isBackgroundMonitoring && !backgroundCheckInterval) {
+                    backgroundCheckInterval = setInterval(() => {
+                        performBackgroundCheck();
+                    }, 5000); // Check every 5 seconds in background
+                }
+                
             } else {
-                console.log('Tab visible - refreshing data');
+                console.log('Page visible - switching to active mode');
+                
+                // Hide background status
+                hideBackgroundStatus();
+                
+                // Stop background polling
+                if (backgroundCheckInterval) {
+                    clearInterval(backgroundCheckInterval);
+                    backgroundCheckInterval = null;
+                }
+                
+                // Restart normal polling if not paused
                 if (!isCapturePaused && isAutoRefresh) {
                     startAutoRefresh();
-                    loadAllData();
+                    loadAllData(); // Immediate refresh
                 }
+                
+                // Check for any attacks that happened while away
+                checkMissedAttacks();
             }
         });
     }
@@ -867,7 +1009,233 @@
             if (countdownInterval) {
                 clearInterval(countdownInterval);
             }
+            if (backgroundCheckInterval) {
+                clearInterval(backgroundCheckInterval);
+            }
+            if (backgroundWorker) {
+                backgroundWorker.terminate();
+            }
         });
+    }
+
+    function requestNotificationPermission() {
+        if ("Notification" in window && Notification.permission === "default") {
+            Notification.requestPermission().then(permission => {
+                console.log("Notification permission:", permission);
+            });
+        }
+    }
+
+    function startBackgroundWorker() {
+        if (typeof(Worker) !== "undefined") {
+            if (!backgroundWorker) {
+                // Create a web worker for background processing
+                const workerCode = `
+                    let lastAttackCount = 0;
+                    let checkInterval = null;
+                    
+                    self.onmessage = function(e) {
+                        if (e.data.command === 'start') {
+                            startMonitoring(e.data.interval);
+                        } else if (e.data.command === 'stop') {
+                            stopMonitoring();
+                        }
+                    };
+                    
+                    function startMonitoring(interval = 5000) {
+                        if (checkInterval) clearInterval(checkInterval);
+                        
+                        checkInterval = setInterval(async () => {
+                            try {
+                                const response = await fetch('/api/network-status');
+                                const data = await response.json();
+                                
+                                // Send update to main thread
+                                self.postMessage({
+                                    type: 'BACKGROUND_UPDATE',
+                                    data: data,
+                                    timestamp: new Date().toISOString()
+                                });
+                                
+                            } catch (error) {
+                                console.error('Background worker error:', error);
+                            }
+                        }, interval);
+                    }
+                    
+                    function stopMonitoring() {
+                        if (checkInterval) {
+                            clearInterval(checkInterval);
+                            checkInterval = null;
+                        }
+                    }
+                `;
+                
+                const blob = new Blob([workerCode], { type: 'application/javascript' });
+                backgroundWorker = new Worker(URL.createObjectURL(blob));
+                
+                backgroundWorker.onmessage = function(event) {
+                    const message = event.data;
+                    
+                    if (message.type === 'BACKGROUND_UPDATE') {
+                        handleBackgroundUpdate(message);
+                    }
+                };
+                
+                // Start the worker with 5 second intervals
+                backgroundWorker.postMessage({ command: 'start', interval: 5000 });
+                console.log('Background worker started');
+            }
+        } else {
+            console.log("Web Workers not supported, using fallback");
+        }
+    }
+
+    function stopBackgroundWorker() {
+        if (backgroundWorker) {
+            backgroundWorker.postMessage({ command: 'stop' });
+            backgroundWorker.terminate();
+            backgroundWorker = null;
+            console.log('Background worker stopped');
+        }
+    }
+
+    function handleBackgroundUpdate(message) {
+        lastBackgroundUpdate = new Date(message.timestamp);
+        
+        // Update background status display
+        if (document.hidden) {
+            document.getElementById('background-update-time').textContent = 
+                `Last update: ${lastBackgroundUpdate.toLocaleTimeString()}`;
+        }
+        
+        const data = message.data;
+        
+        // Check for attacks in background
+        if (data.status === 'success' && data.attack_detected) {
+            // Store attack for when user returns
+            const attackRecord = {
+                type: 'background_attack',
+                message: 'Attack detected while tab was inactive',
+                timestamp: message.timestamp,
+                data: data
+            };
+            
+            // Add to missed attacks array
+            missedAttacks.push(attackRecord);
+            
+            // Store in localStorage for persistence
+            localStorage.setItem('missedAttack_' + Date.now(), JSON.stringify(attackRecord));
+            
+            // Send browser notification if permitted
+            if (Notification.permission === 'granted' && document.hidden) {
+                showBrowserNotification('🚨 Background Attack Detected', 
+                    'Click to return to monitoring');
+            }
+        }
+    }
+
+    function performBackgroundCheck() {
+        fetch('/api/network-status')
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    lastBackgroundUpdate = new Date();
+                    
+                    // Update background status
+                    if (document.hidden) {
+                        document.getElementById('background-update-time').textContent = 
+                            `Last update: ${lastBackgroundUpdate.toLocaleTimeString()}`;
+                    }
+                    
+                    // Check for attacks
+                    if (data.attack_detected) {
+                        handleBackgroundAttack(data);
+                    }
+                }
+            })
+            .catch(error => console.error('Background check failed:', error));
+    }
+
+    function handleBackgroundAttack(data) {
+        // Store attack for when user returns
+        const attackRecord = {
+            type: 'background_attack',
+            message: 'Attack detected while tab was inactive',
+            timestamp: new Date().toISOString(),
+            data: data
+        };
+        
+        missedAttacks.push(attackRecord);
+        
+        // Store in localStorage for persistence across page reloads
+        localStorage.setItem('missedAttack_' + Date.now(), JSON.stringify(attackRecord));
+        
+        // Limit stored attacks to 50
+        cleanupOldMissedAttacks();
+        
+        // Send notification
+        if (Notification.permission === 'granted' && document.hidden) {
+            showBrowserNotification('🚨 Background Attack Detected', 
+                'Click to return to monitoring');
+        }
+    }
+
+    function checkMissedAttacks() {
+        // Check localStorage for missed attacks
+        const missedAttacksKeys = Object.keys(localStorage)
+            .filter(key => key.startsWith('missedAttack_'))
+            .sort(); // Sort by timestamp
+        
+        if (missedAttacksKeys.length > 0) {
+            // Get the most recent attack
+            const latestKey = missedAttacksKeys[missedAttacksKeys.length - 1];
+            const attackData = JSON.parse(localStorage.getItem(latestKey));
+            
+            // Show alert for the most recent attack
+            if (attackData && !document.hidden) {
+                showToast(`⚠️ ${missedAttacksKeys.length} attack(s) detected while you were away`, 'warning');
+                
+                // Clear the stored attacks
+                missedAttacksKeys.forEach(key => {
+                    localStorage.removeItem(key);
+                });
+                
+                missedAttacks = [];
+            }
+        }
+        
+        // Also check in-memory missed attacks
+        if (missedAttacks.length > 0 && !document.hidden) {
+            showToast(`⚠️ ${missedAttacks.length} attack(s) detected while tab was inactive`, 'warning');
+            missedAttacks = [];
+        }
+    }
+
+    function cleanupOldMissedAttacks() {
+        const missedAttacksKeys = Object.keys(localStorage)
+            .filter(key => key.startsWith('missedAttack_'));
+        
+        // If more than 50, remove oldest
+        if (missedAttacksKeys.length > 50) {
+            const sortedKeys = missedAttacksKeys.sort();
+            const keysToRemove = sortedKeys.slice(0, sortedKeys.length - 50);
+            
+            keysToRemove.forEach(key => {
+                localStorage.removeItem(key);
+            });
+        }
+    }
+
+    function showBackgroundStatus() {
+        const statusElement = document.getElementById('background-status');
+        statusElement.style.display = 'block';
+        document.getElementById('background-update-time').textContent = 
+            'Last update: --:--:--';
+    }
+
+    function hideBackgroundStatus() {
+        document.getElementById('background-status').style.display = 'none';
     }
 
     function startAutoRefresh() {
@@ -1138,6 +1506,27 @@
         }
     }
 
+    function showBrowserNotification(title, body) {
+        if (!("Notification" in window)) {
+            return;
+        }
+        
+        if (Notification.permission === "granted") {
+            const notification = new Notification(title, {
+                body: body,
+                icon: '/static/images/notification-icon.png',
+                tag: 'attack-notification'
+            });
+            
+            notification.onclick = function() {
+                window.focus();
+                this.close();
+            };
+            
+            setTimeout(() => notification.close(), 10000);
+        }
+    }
+
     function loadAllData() {
         loadRealTimeTraffic();
         loadTrafficHistory();
@@ -1214,15 +1603,16 @@
                     updateNetworkStatus(data);
                     
                     // Check if system is under attack
-                    if (data.status === 'under_attack' && !isAttackPaused) {
-                        // Get attack details
-                        fetch('/api/attacks')
-                            .then(res => res.json())
-                            .then(attackData => {
-                                if (attackData.attacks && attackData.attacks.length > 0) {
-                                    showAttackAlert(attackData.attacks[0]);
-                                }
-                            });
+                    if (data.attack_detected && !isAttackPaused) {
+                        // Create attack data from status
+                        const attackData = {
+                            type: 'system_alert',
+                            message: data.attack_message || 'System attack detected',
+                            timestamp: new Date().toLocaleTimeString(),
+                            severity: 'High'
+                        };
+                        
+                        showAttackAlert(attackData);
                     }
                 }
             })
@@ -1379,7 +1769,7 @@
         document.getElementById('system-ml-state').style.color = data.ml_enabled ? '#10b981' : '#64748b';
         
         // Update attack state
-        if (data.status === 'under_attack') {
+        if (data.attack_detected) {
             if (!isAttackPaused) {
                 document.getElementById('system-attack-state').textContent = 'Under Attack';
                 document.getElementById('system-attack-state').style.color = '#ef4444';

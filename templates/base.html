@@ -363,20 +363,20 @@
             
             // Update system status
             function updateSystemStatus() {
-                fetch('/api/status')
+                fetch('/api/network-status')
                     .then(response => response.json())
                     .then(data => {
                         const statusIndicator = document.querySelector('.status-indicator');
                         const statusDot = statusIndicator.querySelector('.status-dot');
                         const statusText = statusIndicator.querySelector('span');
                         
-                        if (data.status === 'active') {
+                        if (data.status === 'normal' || data.status === 'active') {
                             statusIndicator.style.background = '#10b981';
                             statusText.textContent = 'System Active';
                         } else if (data.status === 'warning') {
                             statusIndicator.style.background = '#f59e0b';
                             statusText.textContent = 'Warning Detected';
-                        } else if (data.status === 'danger') {
+                        } else if (data.status === 'under_attack' || data.status === 'critical') {
                             statusIndicator.style.background = '#ef4444';
                             statusText.textContent = 'Attack Detected';
                         }
