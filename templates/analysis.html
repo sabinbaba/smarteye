@@ -690,7 +690,7 @@
             });
         
         // Also load status for threat level
-        fetch('/api/status')
+        fetch('/api/network-status')
             .then(response => response.json())
             .then(data => {
                 updateThreatLevel(data);
@@ -919,7 +919,7 @@
 
     function updateMLInsights() {
         // Check if ML is enabled
-        fetch('/api/status')
+        fetch('/api/network-status')
             .then(response => response.json())
             .then(data => {
                 const mlSection = document.getElementById('ml-insights-section');

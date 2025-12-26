@@ -898,7 +898,7 @@
             });
         
         // Load system status for active attacks
-        fetch('/api/status')
+        fetch('/api/network-status')
             .then(response => response.json())
             .then(data => {
                 document.getElementById('active-attacks').textContent = data.active_attacks || 0;
