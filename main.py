@@ -284,7 +284,11 @@ import dash
 from dash import html, dcc, dash_table
 from dash.dependencies import Input, Output
 import plotly.graph_objs as go
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, redirect, url_for, flash, g
+
+# Import authentication modules
+from database import db
+from auth import auth
 
 # =============================
 # CONFIG
@@ -542,28 +546,116 @@ flask_app = Flask(__name__, template_folder='templates')
 # FLASK ROUTES (HTML PAGES)
 # =============================
 @flask_app.route('/')
+@auth.login_required
 def index():
     return render_template('base.html')
 
 @flask_app.route('/network-traffic')
+@auth.login_required
 def network_traffic():
     return render_template('network_traffic.html')
 
 @flask_app.route('/analysis')
+@auth.login_required
 def analysis():
     return render_template('analysis.html')
 
 @flask_app.route('/attacks')
+@auth.login_required
 def attacks():
     return render_template('attacks.html')
 
 @flask_app.route('/notifications')
+@auth.login_required
 def notifications():
     return render_template('notifications.html')
 
 @flask_app.route('/settings')
+@auth.login_required
 def settings():
     return render_template('settings.html')
+
+# =============================
+# AUTHENTICATION ROUTES
+# =============================
+
+@flask_app.route('/login')
+def login():
+    """Login page"""
+    if auth.is_authenticated():
+        return redirect(url_for('index'))
+    return render_template('login.html')
+
+@flask_app.route('/login', methods=['POST'])
+def login_post():
+    """Handle login form submission"""
+    username = request.form.get('username')
+    password = request.form.get('password')
+    remember = request.form.get('remember') == 'on'
+
+    if not username or not password:
+        flash('Please provide both username and password.', 'danger')
+        return redirect(url_for('login'))
+
+    success, message = auth.login_user(username, password, remember)
+    if success:
+        flash(message, 'success')
+        next_page = request.args.get('next')
+        return redirect(next_page) if next_page else redirect(url_for('index'))
+    else:
+        flash(message, 'danger')
+        return redirect(url_for('login'))
+
+@flask_app.route('/register')
+def register():
+    """Registration page"""
+    if auth.is_authenticated():
+        return redirect(url_for('index'))
+    return render_template('register.html')
+
+@flask_app.route('/register', methods=['POST'])
+def register_post():
+    """Handle registration form submission"""
+    username = request.form.get('username')
+    email = request.form.get('email')
+    password = request.form.get('password')
+    confirm_password = request.form.get('confirm_password')
+    full_name = request.form.get('full_name')
+
+    success, message = auth.register_user(username, email, password, confirm_password, full_name)
+    if success:
+        flash(message, 'success')
+        return redirect(url_for('login'))
+    else:
+        if isinstance(message, list):
+            for error in message:
+                flash(error, 'danger')
+        else:
+            flash(message, 'danger')
+        return redirect(url_for('register'))
+
+@flask_app.route('/logout')
+def logout():
+    """Logout user"""
+    auth.logout_user()
+    flash('You have been logged out successfully.', 'info')
+    return redirect(url_for('login'))
+
+@flask_app.route('/change-password', methods=['POST'])
+def change_password():
+    """Change user password"""
+    if not auth.is_authenticated():
+        return jsonify({'success': False, 'message': 'Not authenticated'}), 401
+
+    current_password = request.form.get('current_password')
+    new_password = request.form.get('new_password')
+    confirm_password = request.form.get('confirm_password')
+
+    success, message = auth.change_password(current_password, new_password, confirm_password)
+    if success:
+        return jsonify({'success': True, 'message': message})
+    else:
+        return jsonify({'success': False, 'message': message}), 400
 
 # =============================
 # API ENDPOINTS FOR REAL DATA
