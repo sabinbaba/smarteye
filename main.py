@@ -2379,1346 +2379,10 @@
 
 
 #=====================================================end of v1======================================================
-
-
-# import threading
-# import time
-# import numpy as np
-# import pickle
-# import json
-# import ipaddress
-# import math
-# from collections import defaultdict, deque
-# from datetime import datetime, timedelta
-
-# from scapy.all import sniff, IP, TCP, UDP, ICMP
-
-# import dash
-# from dash import html, dcc, dash_table
-# from dash.dependencies import Input, Output
-# import plotly.graph_objs as go
-# from flask import Flask, render_template, jsonify, request, redirect, url_for, flash, g
-
-# # Import authentication modules
-# from database import db
-# from auth import auth
-
-# # =============================
-# # CONFIG
-# # =============================
-# INTERFACE = "wlan0"       # CHANGE if needed
-# MAX_PACKETS = 5000
-
-# DOS_PPS_THRESHOLD = 500
-# DDOS_SOURCE_THRESHOLD = 5
-# DDOS_TOTAL_PPS = 1500
-
-# FLOW_MIN_PACKETS = 10
-
-# LOG_FILE = "attack_logs.log"
-
-# # =============================
-# # WHITELIST
-# # =============================
-# WHITELISTED_IPS = {
-#     "192.168.243.99",
-#     "192.168.243.1",
-#     "127.0.0.1",
-#     "172.20.10.1",
-#     "0.0.0.0",
-# }
-
-# WHITELIST_PRIVATE_RANGES = True
-
-# # =============================
-# # ZERO-DAY / ANOMALY CONFIG
-# # =============================
-# BASELINE_LEARNING_SECONDS = 120        # 2 minutes of baseline learning
-# ANOMALY_Z_THRESHOLD = 3.0
-# ANOMALY_FEATURE_COUNT = 3
-# ZERO_DAY_COOLDOWN = 30
-
-# # =============================
-# # ATTACK COOLDOWN CONFIG
-# # =============================
-# # Prevents the same attack type+source from firing repeatedly within this window
-# ATTACK_COOLDOWN_SEC = 10
-
-# # =============================
-# # GLOBAL STATE
-# # =============================
-# packet_list = []
-# packet_lock = threading.Lock()
-
-# last_attack = None
-
-# flow_window = deque(maxlen=50)
-
-# # Rate tracking
-# udp_rate  = defaultdict(deque)
-# tcp_rate  = defaultdict(deque)
-# icmp_rate = defaultdict(deque)
-
-# dst_sources = defaultdict(set)
-
-# # Scan tracking
-# syn_ports    = defaultdict(set)   # key: "src->dst"
-# udp_ports    = defaultdict(set)   # key: "src->dst"
-# icmp_targets = defaultdict(set)   # key: src_ip
-
-# # Traffic analysis
-# traffic_history = deque(maxlen=5000)
-# attack_history  = deque(maxlen=1000)
-
-# # Per-attack-type cooldown tracker: "TYPE:src" -> last alert timestamp
-# attack_cooldowns = defaultdict(float)
-# cooldown_lock = threading.Lock()
-
-# # System start time
-# system_start_time = datetime.now()
-
-# # =============================
-# # ZERO-DAY DETECTOR STATE
-# # =============================
-# ip_feature_window = defaultdict(lambda: deque(maxlen=60))
-
-# baseline_means = {}
-# baseline_stds  = {}
-# baseline_samples = defaultdict(list)
-# baseline_ready = False
-# baseline_start = None
-
-# zero_day_last_alert = {}
-
-# FEATURE_NAMES = [
-#     "pkt_count", "byte_count", "unique_dsts",
-#     "unique_dports", "syn_count", "udp_count",
-#     "icmp_count", "avg_pkt_size", "dst_entropy"
-# ]
-
-# ip_bucket_data = defaultdict(lambda: {
-#     "pkt_count":    0,
-#     "byte_count":   0,
-#     "unique_dsts":  set(),
-#     "unique_dports": set(),
-#     "syn_count":    0,
-#     "udp_count":    0,
-#     "icmp_count":   0,
-#     "sizes":        [],
-#     "bucket_start": time.time()
-# })
-
-# ip_bucket_lock = threading.Lock()
-
-# # =============================
-# # OPTIONAL ML
-# # =============================
-# ML_ENABLED = False
-# model = None
-# scaler = None
-# label_encoder = None
-
-# try:
-#     from tensorflow import keras
-#     from sklearn.preprocessing import StandardScaler
-
-#     model = keras.models.load_model("model/best_fnn_good_classes.h5")
-#     with open("model/fixed_label_encoders_good_classes.pkl", "rb") as f:
-#         label_encoder = pickle.load(f)[" Label"]
-
-#     scaler = StandardScaler()
-#     scaler.fit(np.random.randn(100, model.input_shape[1]))
-
-#     ML_ENABLED = True
-#     print("✅ ML ENABLED")
-
-# except Exception as e:
-#     print("⚠️ ML disabled:", e)
-
-
-# # =============================
-# # WHITELIST HELPER
-# # =============================
-# def is_whitelisted(ip):
-#     if ip in WHITELISTED_IPS:
-#         return True
-#     if WHITELIST_PRIVATE_RANGES:
-#         try:
-#             addr = ipaddress.ip_address(ip)
-#             if addr.is_loopback or addr.is_link_local or addr.is_multicast:
-#                 return True
-#         except ValueError:
-#             pass
-#     return False
-
-
-# # =============================
-# # ZERO-DAY / ANOMALY HELPERS
-# # =============================
-# def entropy(values):
-#     """Shannon entropy of a list of values (e.g. destination ports)."""
-#     if not values:
-#         return 0.0
-#     counts = defaultdict(int)
-#     for v in values:
-#         counts[v] += 1
-#     total = len(values)
-#     return -sum((c / total) * math.log2(c / total) for c in counts.values())
-
-
-# def extract_bucket_features(bucket):
-#     """Convert a raw bucket dict into a flat feature vector."""
-#     pkt_count   = bucket["pkt_count"]
-#     byte_count  = bucket["byte_count"]
-#     unique_dsts = len(bucket["unique_dsts"])
-#     unique_dports = len(bucket["unique_dports"])
-#     syn_count   = bucket["syn_count"]
-#     udp_count   = bucket["udp_count"]
-#     icmp_count  = bucket["icmp_count"]
-#     avg_pkt_size = (byte_count / pkt_count) if pkt_count > 0 else 0
-#     dst_entropy = entropy(list(bucket["unique_dports"]))
-
-#     return {
-#         "pkt_count":    pkt_count,
-#         "byte_count":   byte_count,
-#         "unique_dsts":  unique_dsts,
-#         "unique_dports": unique_dports,
-#         "syn_count":    syn_count,
-#         "udp_count":    udp_count,
-#         "icmp_count":   icmp_count,
-#         "avg_pkt_size": avg_pkt_size,
-#         "dst_entropy":  dst_entropy
-#     }
-
-
-# def update_baseline(features):
-#     """Add a feature sample to the baseline during the learning phase."""
-#     global baseline_ready, baseline_means, baseline_stds
-
-#     for fname, val in features.items():
-#         baseline_samples[fname].append(val)
-
-#     if not baseline_ready:
-#         elapsed = time.time() - (baseline_start or time.time())
-#         if elapsed >= BASELINE_LEARNING_SECONDS and len(baseline_samples["pkt_count"]) >= 10:
-#             for fname in FEATURE_NAMES:
-#                 vals = baseline_samples[fname]
-#                 if vals:
-#                     baseline_means[fname] = float(np.mean(vals))
-#                     raw_std = float(np.std(vals))
-#                     baseline_stds[fname] = max(raw_std, baseline_means[fname] * 0.1 + 0.01)
-#             baseline_ready = True
-#             print("✅ Zero-day baseline established. Anomaly detection is now ACTIVE.")
-
-
-# def check_anomaly(src, features):
-#     """
-#     Compare current features against the baseline.
-#     Returns (is_anomaly: bool, anomalous_features: list, max_z: float)
-#     """
-#     if not baseline_ready:
-#         return False, [], 0.0
-
-#     anomalous = []
-#     max_z = 0.0
-
-#     for fname in FEATURE_NAMES:
-#         val  = features.get(fname, 0)
-#         mean = baseline_means.get(fname, 0)
-#         std  = baseline_stds.get(fname, 1)
-
-#         z = abs(val - mean) / std
-#         if z > ANOMALY_Z_THRESHOLD:
-#             anomalous.append((fname, val, mean, round(z, 2)))
-#             if z > max_z:
-#                 max_z = z
-
-#     return len(anomalous) >= ANOMALY_FEATURE_COUNT, anomalous, round(max_z, 2)
-
-
-# def flush_ip_bucket(src):
-#     """
-#     Flush the current 10-second bucket for an IP, run anomaly detection,
-#     then reset the bucket.
-#     """
-#     global zero_day_last_alert
-
-#     with ip_bucket_lock:
-#         bucket = ip_bucket_data[src]
-#         now    = time.time()
-
-#         if now - bucket["bucket_start"] < 10:
-#             return "normal"
-
-#         features = extract_bucket_features(bucket)
-
-#         ip_bucket_data[src] = {
-#             "pkt_count":    0,
-#             "byte_count":   0,
-#             "unique_dsts":  set(),
-#             "unique_dports": set(),
-#             "syn_count":    0,
-#             "udp_count":    0,
-#             "icmp_count":   0,
-#             "sizes":        [],
-#             "bucket_start": now
-#         }
-
-#     if not baseline_ready:
-#         update_baseline(features)
-#         return "normal"
-
-#     is_anomaly, anomalous_features, max_z = check_anomaly(src, features)
-
-#     if is_anomaly and not is_whitelisted(src):
-#         last = zero_day_last_alert.get(src, 0)
-#         if now - last >= ZERO_DAY_COOLDOWN:
-#             zero_day_last_alert[src] = now
-#             feat_summary = ", ".join(
-#                 f"{f}={v:.1f}(z={z})" for f, v, m, z in anomalous_features[:4]
-#             )
-#             log_attack(
-#                 "ZERO_DAY",
-#                 f"SRC={src} ANOMALY max_z={max_z} [{feat_summary}]",
-#                 src=src
-#             )
-#             return "attack"
-
-#     return "normal"
-
-
-# def update_ip_bucket(src, dst, proto, dport, pkt_len, flags):
-#     """Update the rolling per-IP feature bucket with a new packet."""
-#     with ip_bucket_lock:
-#         b = ip_bucket_data[src]
-#         b["pkt_count"]  += 1
-#         b["byte_count"] += pkt_len
-#         b["unique_dsts"].add(dst)
-#         if dport:
-#             b["unique_dports"].add(dport)
-#         if proto == "TCP" and "SYN" in flags:
-#             b["syn_count"] += 1
-#         if proto == "UDP":
-#             b["udp_count"] += 1
-#         if proto == "ICMP":
-#             b["icmp_count"] += 1
-#         b["sizes"].append(pkt_len)
-
-
-# # =============================
-# # HELPERS
-# # =============================
-# def log_attack(atype, msg, src=""):
-#     """
-#     Log an attack event.
-
-#     Uses a per (type, src) cooldown to suppress duplicate alerts without
-#     ever pausing packet capture — detection continues uninterrupted.
-#     """
-#     global last_attack
-
-#     now = time.time()
-#     cooldown_key = f"{atype}:{src}"
-
-#     with cooldown_lock:
-#         if now - attack_cooldowns[cooldown_key] < ATTACK_COOLDOWN_SEC:
-#             return   # duplicate alert within cooldown window — skip silently
-#         attack_cooldowns[cooldown_key] = now
-
-#     last_attack = f"{atype} | {msg}"
-
-#     attack_entry = {
-#         "type":      atype,
-#         "message":   msg,
-#         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-#         "time":      datetime.now()
-#     }
-#     attack_history.append(attack_entry)
-
-#     print(f"🚨 ATTACK DETECTED [{atype}] {msg}")
-
-#     with open(LOG_FILE, "a") as f:
-#         f.write(f"[{datetime.now()}] {atype} | {msg}\n")
-
-
-# def rate_update(rate_dict, key):
-#     now = time.time()
-#     rate_dict[key].append(now)
-#     while rate_dict[key] and now - rate_dict[key][0] > 1:
-#         rate_dict[key].popleft()
-#     return len(rate_dict[key])
-
-
-# def get_uptime():
-#     uptime  = datetime.now() - system_start_time
-#     days    = uptime.days
-#     hours   = uptime.seconds // 3600
-#     minutes = (uptime.seconds % 3600) // 60
-#     seconds = uptime.seconds % 60
-
-#     if days > 0:
-#         return f"{days}d {hours}h {minutes}m"
-#     elif hours > 0:
-#         return f"{hours}h {minutes}m {seconds}s"
-#     else:
-#         return f"{minutes}m {seconds}s"
-
-
-# def get_time_ago(dt):
-#     now  = datetime.now()
-#     diff = now - dt
-
-#     if diff.days > 0:
-#         return f"{diff.days} day{'s' if diff.days > 1 else ''} ago"
-#     elif diff.seconds > 3600:
-#         hours = diff.seconds // 3600
-#         return f"{hours} hour{'s' if hours > 1 else ''} ago"
-#     elif diff.seconds > 60:
-#         minutes = diff.seconds // 60
-#         return f"{minutes} minute{'s' if minutes > 1 else ''} ago"
-#     else:
-#         return "Just now"
-
-
-# # =============================
-# # PACKET CALLBACK
-# # =============================
-# def packet_callback(pkt):
-#     global baseline_start
-
-#     # Never pause — always process every packet
-#     if IP not in pkt:
-#         return
-
-#     # Start baseline timer on first packet
-#     if baseline_start is None:
-#         baseline_start = time.time()
-#         print(f"📊 Zero-day baseline learning started ({BASELINE_LEARNING_SECONDS}s window)...")
-
-#     src   = pkt[IP].src
-#     dst   = pkt[IP].dst
-#     proto = "OTHER"
-#     dport = 0
-#     flags = ""
-#     attack_status = "normal"
-
-#     if TCP in pkt:
-#         proto = "TCP"
-#         dport = pkt[TCP].dport
-#         if pkt[TCP].flags.S: flags += "SYN "
-#         if pkt[TCP].flags.A: flags += "ACK "
-#         if pkt[TCP].flags.F: flags += "FIN "
-#         if pkt[TCP].flags.R: flags += "RST "
-#         if pkt[TCP].flags.P: flags += "PSH "
-#         if pkt[TCP].flags.U: flags += "URG "
-
-#     elif UDP in pkt:
-#         proto = "UDP"
-#         dport = pkt[UDP].dport
-
-#     elif ICMP in pkt:
-#         proto = "ICMP"
-
-#     pkt_len = len(pkt)
-
-#     pkt_info = {
-#         "time":           time.time(),
-#         "timestamp":      datetime.now().strftime("%H:%M:%S.%f")[:-3],
-#         "full_timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-#         "src":            src,
-#         "dst":            dst,
-#         "protocol":       proto,
-#         "dport":          dport,
-#         "length":         pkt_len,
-#         "attack":         "",
-#         "status":         attack_status,
-#         "flags":          flags.strip()
-#     }
-
-#     traffic_history.append({**pkt_info, "attack": ""})
-
-#     with packet_lock:
-#         packet_list.append(pkt_info)
-#         if len(packet_list) > MAX_PACKETS:
-#             packet_list.pop(0)
-
-#     # Update per-IP feature bucket (for zero-day detection)
-#     update_ip_bucket(src, dst, proto, dport, pkt_len, flags)
-
-#     # =============================
-#     # PORT SCAN DETECTION
-#     # =============================
-#     if proto == "TCP" and "SYN" in flags:
-#         if not is_whitelisted(src):
-#             current_pps = len(tcp_rate[src])
-#             if current_pps < DOS_PPS_THRESHOLD * 0.5:
-#                 key = f"{src}->{dst}"
-#                 syn_ports[key].add(dport)
-#                 if len(syn_ports[key]) >= 20:
-#                     log_attack("PORT_SCAN", f"SRC={src} DST={dst} PORTS={len(syn_ports[key])}", src=src)
-#                     attack_status = "attack"
-
-#     if proto == "UDP":
-#         if not is_whitelisted(src):
-#             current_pps = len(udp_rate[src])
-#             if current_pps < DOS_PPS_THRESHOLD * 0.5:
-#                 key = f"{src}->{dst}"
-#                 udp_ports[key].add(dport)
-#                 if len(udp_ports[key]) >= 15:
-#                     log_attack("UDP_SCAN", f"SRC={src} DST={dst} PORTS={len(udp_ports[key])}", src=src)
-#                     attack_status = "attack"
-
-#     if proto == "ICMP":
-#         if not is_whitelisted(src):
-#             current_pps = len(icmp_rate[src])
-#             if current_pps < DOS_PPS_THRESHOLD * 0.5:
-#                 icmp_targets[src].add(dst)
-#                 if len(icmp_targets[src]) >= 5:
-#                     log_attack("ICMP_SCAN", f"SRC={src} TARGETS={len(icmp_targets[src])}", src=src)
-#                     attack_status = "attack"
-
-#     # =============================
-#     # DoS / DDoS DETECTION
-#     # =============================
-#     if proto == "UDP":
-#         pps = rate_update(udp_rate, src)
-#         dst_sources[dst].add(src)
-
-#         if pps > DOS_PPS_THRESHOLD:
-#             log_attack("DoS", f"UDP_FLOOD SRC={src} PPS={pps}", src=src)
-#             attack_status = "attack"
-#         elif pps > DOS_PPS_THRESHOLD * 0.7:
-#             attack_status = "suspicious"
-
-#         total_pps = sum(len(udp_rate[s]) for s in dst_sources[dst])
-#         if len(dst_sources[dst]) >= DDOS_SOURCE_THRESHOLD and total_pps > DDOS_TOTAL_PPS:
-#             log_attack("DDoS", f"UDP_DDoS DST={dst} SOURCES={len(dst_sources[dst])}", src=src)
-#             attack_status = "attack"
-
-#     if proto == "TCP" and "SYN" in flags:
-#         pps = rate_update(tcp_rate, src)
-#         dst_sources[dst].add(src)
-
-#         if pps > DOS_PPS_THRESHOLD:
-#             log_attack("DoS", f"SYN_FLOOD SRC={src} PPS={pps}", src=src)
-#             attack_status = "attack"
-#         elif pps > DOS_PPS_THRESHOLD * 0.7:
-#             attack_status = "suspicious"
-
-#         total_pps = sum(len(tcp_rate[s]) for s in dst_sources[dst])
-#         if len(dst_sources[dst]) >= DDOS_SOURCE_THRESHOLD and total_pps > DDOS_TOTAL_PPS:
-#             log_attack("DDoS", f"SYN_DDoS DST={dst} SOURCES={len(dst_sources[dst])}", src=src)
-#             attack_status = "attack"
-
-#     if proto == "ICMP":
-#         rate_update(icmp_rate, src)
-
-#     # =============================
-#     # ZERO-DAY / ANOMALY DETECTION
-#     # =============================
-#     if attack_status == "normal" and not is_whitelisted(src):
-#         zd_status = flush_ip_bucket(src)
-#         if zd_status == "attack":
-#             attack_status = "suspicious"
-
-#     # =============================
-#     # SUSPICIOUS FALLBACK
-#     # =============================
-#     if attack_status == "normal" and not is_whitelisted(src):
-#         pps_tcp  = len(tcp_rate[src])
-#         pps_udp  = len(udp_rate[src])
-#         pps_icmp = len(icmp_rate[src])
-#         total_pps_src = pps_tcp + pps_udp + pps_icmp
-
-#         soft_threshold = DOS_PPS_THRESHOLD * 0.1
-#         if total_pps_src > soft_threshold:
-#             attack_status = "suspicious"
-
-#     # Update packet status
-#     pkt_info["status"] = attack_status
-#     if traffic_history:
-#         traffic_history[-1]["status"] = attack_status
-
-
-# # =============================
-# # BACKGROUND: PERIODIC BUCKET FLUSH THREAD
-# # =============================
-# def bucket_flush_worker():
-#     while True:
-#         time.sleep(10)
-#         with ip_bucket_lock:
-#             sources = list(ip_bucket_data.keys())
-#         for src in sources:
-#             flush_ip_bucket(src)
-
-# threading.Thread(target=bucket_flush_worker, daemon=True).start()
-
-
-# # =============================
-# # SNIFFER THREAD
-# # =============================
-# def start_sniffer():
-#     print(f"📡 Sniffing on {INTERFACE}")
-#     try:
-#         sniff(iface=INTERFACE, prn=packet_callback, store=False)
-#     except Exception as e:
-#         print(f"❌ Sniffer error: {e}")
-#         print("Trying fallback to default interface...")
-#         try:
-#             sniff(prn=packet_callback, store=False)
-#         except Exception as e2:
-#             print(f"❌ Fallback also failed: {e2}")
-
-# threading.Thread(target=start_sniffer, daemon=True).start()
-
-
-# # =============================
-# # FLASK APP
-# # =============================
-# flask_app = Flask(__name__, template_folder='templates')
-
-# flask_app.config['SECRET_KEY'] = 'hybrid-ids-secret-key-change-in-production-2024'
-# flask_app.config['SESSION_TYPE'] = 'filesystem'
-# flask_app.config['SESSION_PERMANENT'] = True
-# flask_app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
-
-# auth.init_app(flask_app)
-
-
-# # =============================
-# # FLASK ROUTES
-# # =============================
-# @flask_app.route('/')
-# def index():
-#     if auth.is_authenticated():
-#         return redirect(url_for('network_traffic'))
-#     return render_template('login.html')
-
-# @flask_app.route('/network-traffic')
-# @auth.login_required
-# def network_traffic():
-#     return render_template('network_traffic.html')
-
-# @flask_app.route('/analysis')
-# @auth.login_required
-# def analysis():
-#     return render_template('analysis.html')
-
-# @flask_app.route('/attacks')
-# @auth.login_required
-# def attacks():
-#     return render_template('attacks.html')
-
-# @flask_app.route('/notifications')
-# @auth.login_required
-# def notifications():
-#     return render_template('notifications.html')
-
-# @flask_app.route('/settings')
-# @auth.admin_required
-# def settings():
-#     return render_template('settings.html')
-
-
-# # =============================
-# # AUTH ROUTES
-# # =============================
-# @flask_app.route('/login')
-# def login():
-#     if auth.is_authenticated():
-#         return redirect(url_for('index'))
-#     return render_template('login.html')
-
-# @flask_app.route('/login', methods=['POST'])
-# def login_post():
-#     username = request.form.get('username')
-#     password = request.form.get('password')
-#     remember = request.form.get('remember') == 'on'
-
-#     if not username or not password:
-#         flash('Please provide both username and password.', 'danger')
-#         return redirect(url_for('login'))
-
-#     success, message = auth.login_user(username, password, remember)
-#     if success:
-#         flash(message, 'success')
-#         next_page = request.args.get('next')
-#         return redirect(next_page) if next_page else redirect(url_for('network_traffic'))
-#     else:
-#         flash(message, 'danger')
-#         return redirect(url_for('login'))
-
-# @flask_app.route('/register')
-# def register():
-#     if auth.is_authenticated():
-#         return redirect(url_for('index'))
-#     return render_template('register.html')
-
-# @flask_app.route('/register', methods=['POST'])
-# def register_post():
-#     username         = request.form.get('username')
-#     email            = request.form.get('email')
-#     password         = request.form.get('password')
-#     confirm_password = request.form.get('confirm_password')
-#     full_name        = request.form.get('full_name')
-
-#     success, message = auth.register_user(username, email, password, confirm_password, full_name)
-#     if success:
-#         flash(message, 'success')
-#         return redirect(url_for('login'))
-#     else:
-#         if isinstance(message, list):
-#             for error in message:
-#                 flash(error, 'danger')
-#         else:
-#             flash(message, 'danger')
-#         return redirect(url_for('register'))
-
-# @flask_app.route('/logout')
-# def logout():
-#     auth.logout_user()
-#     flash('You have been logged out successfully.', 'info')
-#     return redirect(url_for('login'))
-
-# @flask_app.route('/change-password', methods=['POST'])
-# def change_password():
-#     if not auth.is_authenticated():
-#         return jsonify({'success': False, 'message': 'Not authenticated'}), 401
-
-#     current_password = request.form.get('current_password')
-#     new_password     = request.form.get('new_password')
-#     confirm_password = request.form.get('confirm_password')
-
-#     success, message = auth.change_password(current_password, new_password, confirm_password)
-#     if success:
-#         return jsonify({'success': True, 'message': message})
-#     else:
-#         return jsonify({'success': False, 'message': message}), 400
-
-
-# # =============================
-# # API ENDPOINTS
-# # =============================
-
-# @flask_app.route('/api/real-time-traffic')
-# def api_real_time_traffic():
-#     try:
-#         with packet_lock:
-#             recent_packets = packet_list[-100:]
-#             packet_data = []
-#             for pkt in recent_packets:
-#                 packet_data.append({
-#                     "timestamp": pkt.get("timestamp", "--:--:--"),
-#                     "src":       pkt.get("src", "N/A"),
-#                     "dst":       pkt.get("dst", "N/A"),
-#                     "protocol":  pkt.get("protocol", "N/A"),
-#                     "dport":     pkt.get("dport", "N/A"),
-#                     "length":    pkt.get("length", 0),
-#                     "status":    pkt.get("status", "normal"),
-#                     "flags":     pkt.get("flags", "")
-#                 })
-
-#         stats = calculate_real_time_stats()
-
-#         return jsonify({
-#             "packets":        packet_data[::-1],
-#             "stats":          stats,
-#             "last_updated":   datetime.now().strftime("%H:%M:%S"),
-#             "total_captured": len(packet_list),
-#             "status":         "success"
-#         })
-#     except Exception as e:
-#         return jsonify({
-#             "packets": [], "stats": {},
-#             "last_updated": datetime.now().strftime("%H:%M:%S"),
-#             "total_captured": 0, "status": "error", "error": str(e)
-#         })
-
-
-# def calculate_real_time_stats():
-#     try:
-#         with packet_lock:
-#             packets = packet_list[-1000:] if len(packet_list) > 1000 else packet_list.copy()
-
-#         if not packets:
-#             return {
-#                 "total": 0, "safe": 0, "suspicious": 0, "attack": 0,
-#                 "tcp": 0, "udp": 0, "icmp": 0, "other": 0,
-#                 "avg_packet_size": 0, "packets_per_sec": 0,
-#                 "baseline_ready": baseline_ready,
-#                 "baseline_progress": min(100, int(
-#                     ((time.time() - (baseline_start or time.time())) / BASELINE_LEARNING_SECONDS) * 100
-#                 )) if baseline_start else 0
-#             }
-
-#         tcp_count   = sum(1 for p in packets if p.get("protocol") == "TCP")
-#         udp_count   = sum(1 for p in packets if p.get("protocol") == "UDP")
-#         icmp_count  = sum(1 for p in packets if p.get("protocol") == "ICMP")
-#         other_count = len(packets) - tcp_count - udp_count - icmp_count
-
-#         safe_count       = sum(1 for p in packets if p.get("status") == "normal")
-#         suspicious_count = sum(1 for p in packets if p.get("status") == "suspicious")
-#         attack_count     = sum(1 for p in packets if p.get("status") == "attack")
-
-#         avg_size = sum(p.get("length", 0) for p in packets) / len(packets)
-
-#         now    = time.time()
-#         recent = [p for p in packets if now - p.get("time", now) <= 5]
-#         packets_per_sec = len(recent) / 5 if recent else 0
-
-#         if baseline_ready:
-#             baseline_progress = 100
-#         elif baseline_start:
-#             elapsed = time.time() - baseline_start
-#             baseline_progress = min(99, int((elapsed / BASELINE_LEARNING_SECONDS) * 100))
-#         else:
-#             baseline_progress = 0
-
-#         return {
-#             "total":              len(packets),
-#             "safe":               safe_count,
-#             "suspicious":         suspicious_count,
-#             "attack":             attack_count,
-#             "tcp":                tcp_count,
-#             "udp":                udp_count,
-#             "icmp":               icmp_count,
-#             "other":              other_count,
-#             "avg_packet_size":    round(avg_size, 2),
-#             "packets_per_sec":    round(packets_per_sec, 2),
-#             "baseline_ready":     baseline_ready,
-#             "baseline_progress":  baseline_progress
-#         }
-#     except Exception as e:
-#         print(f"Error calculating stats: {e}")
-#         return {
-#             "total": 0, "safe": 0, "suspicious": 0, "attack": 0,
-#             "tcp": 0, "udp": 0, "icmp": 0, "other": 0,
-#             "avg_packet_size": 0, "packets_per_sec": 0,
-#             "baseline_ready": False, "baseline_progress": 0
-#         }
-
-
-# @flask_app.route('/api/traffic-history')
-# def api_traffic_history():
-#     try:
-#         five_min_ago = time.time() - 300
-
-#         with packet_lock:
-#             recent_traffic = [p for p in packet_list if p.get("time", 0) > five_min_ago]
-
-#         protocol_data = {}
-#         for pkt in recent_traffic:
-#             proto = pkt.get("protocol", "OTHER")
-#             protocol_data[proto] = protocol_data.get(proto, 0) + 1
-
-#         timeline_data = []
-#         now = time.time()
-
-#         for i in range(30):
-#             interval_start = now - (i + 1) * 10
-#             interval_end   = now - i * 10
-
-#             interval_packets = [
-#                 p for p in recent_traffic
-#                 if interval_start < p.get("time", 0) <= interval_end
-#             ]
-
-#             timeline_data.append({
-#                 "time":       datetime.fromtimestamp(interval_end).strftime("%H:%M:%S"),
-#                 "packets":    len(interval_packets),
-#                 "tcp":        sum(1 for p in interval_packets if p.get("protocol") == "TCP"),
-#                 "udp":        sum(1 for p in interval_packets if p.get("protocol") == "UDP"),
-#                 "icmp":       sum(1 for p in interval_packets if p.get("protocol") == "ICMP"),
-#                 "suspicious": sum(1 for p in interval_packets if p.get("status") == "suspicious"),
-#                 "attack":     sum(1 for p in interval_packets if p.get("status") == "attack")
-#             })
-
-#         timeline_data.reverse()
-
-#         return jsonify({
-#             "protocol_distribution": protocol_data,
-#             "timeline":   timeline_data,
-#             "time_range": "5 minutes",
-#             "status":     "success"
-#         })
-#     except Exception as e:
-#         return jsonify({
-#             "error": str(e), "protocol_distribution": {},
-#             "timeline": [], "time_range": "5 minutes", "status": "error"
-#         })
-
-
-# @flask_app.route('/api/top-conversations')
-# def api_top_conversations():
-#     try:
-#         with packet_lock:
-#             recent_packets = packet_list[-500:] if len(packet_list) > 500 else packet_list.copy()
-
-#         conversation_counts = {}
-#         conversation_bytes  = {}
-
-#         for pkt in recent_packets:
-#             src = pkt.get("src", "Unknown")
-#             dst = pkt.get("dst", "Unknown")
-#             key = f"{src}->{dst}"
-#             conversation_counts[key] = conversation_counts.get(key, 0) + 1
-#             conversation_bytes[key]  = conversation_bytes.get(key, 0) + pkt.get("length", 0)
-
-#         top_conversations = sorted(
-#             conversation_counts.items(), key=lambda x: x[1], reverse=True
-#         )[:10]
-
-#         result = []
-#         for conv, count in top_conversations:
-#             src, dst    = conv.split("->")
-#             total_bytes = conversation_bytes.get(conv, 0)
-#             result.append({
-#                 "source":          src,
-#                 "destination":     dst,
-#                 "packet_count":    count,
-#                 "total_bytes":     total_bytes,
-#                 "avg_packet_size": total_bytes // count if count > 0 else 0
-#             })
-
-#         return jsonify({"conversations": result, "status": "success"})
-#     except Exception as e:
-#         return jsonify({"conversations": [], "status": "error", "error": str(e)})
-
-
-# @flask_app.route('/api/packet-size-distribution')
-# def api_packet_size_distribution():
-#     try:
-#         with packet_lock:
-#             recent_packets = packet_list[-500:] if len(packet_list) > 500 else packet_list.copy()
-
-#         size_bins = {"0-100": 0, "101-500": 0, "501-1000": 0, "1001-1500": 0, "1501+": 0}
-#         sizes = []
-
-#         for pkt in recent_packets:
-#             size = pkt.get("length", 0)
-#             sizes.append(size)
-#             if size <= 100:    size_bins["0-100"]     += 1
-#             elif size <= 500:  size_bins["101-500"]   += 1
-#             elif size <= 1000: size_bins["501-1000"]  += 1
-#             elif size <= 1500: size_bins["1001-1500"] += 1
-#             else:              size_bins["1501+"]     += 1
-
-#         most_common = max(size_bins.items(), key=lambda x: x[1])[0] if size_bins else "0-100"
-
-#         return jsonify({
-#             "distribution": size_bins,
-#             "min_size":     min(sizes) if sizes else 0,
-#             "max_size":     max(sizes) if sizes else 0,
-#             "avg_size":     sum(sizes) / len(sizes) if sizes else 0,
-#             "most_common":  most_common,
-#             "status":       "success"
-#         })
-#     except Exception as e:
-#         return jsonify({
-#             "distribution": {}, "min_size": 0, "max_size": 0,
-#             "avg_size": 0, "most_common": "0-100", "status": "error", "error": str(e)
-#         })
-
-
-# @flask_app.route('/api/network-status')
-# def api_network_status():
-#     try:
-#         now = time.time()
-
-#         # Derive status purely from recent attack history — no paused flag needed
-#         recent_attacks = [
-#             a for a in attack_history
-#             if (datetime.now() - a["time"]).total_seconds() < 300
-#         ]
-#         very_recent_attacks = [
-#             a for a in attack_history
-#             if (datetime.now() - a["time"]).total_seconds() < 10
-#         ]
-
-#         if very_recent_attacks:
-#             status = "under_attack"
-#         elif recent_attacks:
-#             status = "warning"
-#         else:
-#             status = "normal"
-
-#         recent_packets  = [p for p in packet_list if now - p.get("time", now) <= 10]
-#         packets_per_sec = len(recent_packets) / 10 if recent_packets else 0
-
-#         if baseline_ready:
-#             bl_progress = 100
-#         elif baseline_start:
-#             bl_progress = min(99, int(((now - baseline_start) / BASELINE_LEARNING_SECONDS) * 100))
-#         else:
-#             bl_progress = 0
-
-#         return jsonify({
-#             "status":               status,
-#             "packets_per_second":   round(packets_per_sec, 2),
-#             "total_packets":        len(packet_list),
-#             "active_attacks":       len(recent_attacks),
-#             "interface":            INTERFACE,
-#             "uptime":               get_uptime(),
-#             "ml_enabled":           ML_ENABLED,
-#             "memory_usage":         round(len(packet_list) * 0.01, 2),
-#             "capture_status":       "active",   # always active now
-#             "attack_status":        "normal" if status == "normal" else "warning" if status == "warning" else "critical",
-#             "system_time":          datetime.now().strftime("%H:%M:%S"),
-#             "zero_day_enabled":     True,
-#             "baseline_ready":       baseline_ready,
-#             "baseline_progress":    bl_progress,
-#             "anomaly_z_threshold":  ANOMALY_Z_THRESHOLD,
-#         })
-#     except Exception as e:
-#         return jsonify({
-#             "status": "error", "error": str(e), "interface": INTERFACE,
-#             "uptime": "00:00:00", "ml_enabled": ML_ENABLED,
-#             "capture_status": "active", "attack_status": "unknown",
-#             "zero_day_enabled": True, "baseline_ready": False, "baseline_progress": 0
-#         })
-
-
-# @flask_app.route('/api/attacks')
-# def api_attacks():
-#     try:
-#         import re
-#         attacks_list = sorted(list(attack_history), key=lambda x: x["time"], reverse=True)
-
-#         attack_data = []
-#         for attack in attacks_list[:50]:
-#             source  = "Unknown"
-#             target  = "Unknown"
-#             message = attack["message"]
-
-#             src_match = re.search(r'SRC=([\d\.]+)', message)
-#             dst_match = re.search(r'DST=([\d\.]+)', message)
-#             if src_match: source = src_match.group(1)
-#             if dst_match: target = dst_match.group(1)
-
-#             atype = attack["type"]
-#             severity = "medium"
-#             if "DDoS"       in atype: severity = "critical"
-#             elif "DoS"      in atype: severity = "high"
-#             elif "FLOOD"    in atype: severity = "high"
-#             elif "ZERO_DAY" in atype: severity = "critical"
-#             elif "SCAN"     in atype: severity = "medium"
-
-#             attack_data.append({
-#                 "type":      atype,
-#                 "message":   message,
-#                 "timestamp": attack["timestamp"],
-#                 "source":    source,
-#                 "target":    target,
-#                 "severity":  severity,
-#                 "time_ago":  get_time_ago(attack["time"])
-#             })
-
-#         return jsonify({
-#             "attacks": attack_data,
-#             "total":   len(attack_history),
-#             "today":   len([a for a in attack_history if a["time"].date() == datetime.now().date()]),
-#             "zero_day_count": len([a for a in attack_history if "ZERO_DAY" in a["type"]]),
-#             "status":  "success"
-#         })
-#     except Exception as e:
-#         return jsonify({"attacks": [], "total": 0, "today": 0, "zero_day_count": 0,
-#                         "status": "error", "error": str(e)})
-
-
-# @flask_app.route('/api/notifications')
-# def api_notifications():
-#     try:
-#         notifications_list = []
-
-#         notifications_list.append({
-#             "id": 1, "type": "system",
-#             "title":     "System Started",
-#             "message":   f"Hybrid IDS started on interface {INTERFACE}",
-#             "timestamp": system_start_time.strftime("%H:%M:%S"),
-#             "read": True, "priority": "info"
-#         })
-
-#         if ML_ENABLED:
-#             notifications_list.append({
-#                 "id": 2, "type": "system",
-#                 "title":     "ML Detection Enabled",
-#                 "message":   "Machine learning attack detection is active",
-#                 "timestamp": datetime.now().strftime("%H:%M:%S"),
-#                 "read": True, "priority": "info"
-#             })
-
-#         if baseline_ready:
-#             notifications_list.append({
-#                 "id": 3, "type": "system",
-#                 "title":     "Zero-Day Detection Active",
-#                 "message":   f"Anomaly baseline established. Z-threshold={ANOMALY_Z_THRESHOLD}",
-#                 "timestamp": datetime.now().strftime("%H:%M:%S"),
-#                 "read": True, "priority": "info"
-#             })
-#         elif baseline_start:
-#             elapsed = time.time() - baseline_start
-#             pct = min(99, int((elapsed / BASELINE_LEARNING_SECONDS) * 100))
-#             notifications_list.append({
-#                 "id": 3, "type": "system",
-#                 "title":     "Zero-Day Baseline Learning…",
-#                 "message":   f"Building traffic baseline ({pct}% complete, {BASELINE_LEARNING_SECONDS}s window)",
-#                 "timestamp": datetime.now().strftime("%H:%M:%S"),
-#                 "read": True, "priority": "info"
-#             })
-
-#         for i, attack in enumerate(list(attack_history)[-10:]):
-#             priority = "critical" if "DDoS" in attack["type"] or "ZERO_DAY" in attack["type"] \
-#                        else "high" if "DoS" in attack["type"] else "medium"
-#             notifications_list.append({
-#                 "id":        1000 + i,
-#                 "type":      "attack",
-#                 "title":     f"Attack: {attack['type']}",
-#                 "message":   attack['message'],
-#                 "timestamp": attack['timestamp'],
-#                 "read":      False,
-#                 "priority":  priority
-#             })
-
-#         return jsonify({
-#             "notifications": notifications_list[::-1],
-#             "unread":        len([n for n in notifications_list if not n.get("read", False)]),
-#             "status":        "success"
-#         })
-#     except Exception as e:
-#         return jsonify({"notifications": [], "unread": 0, "status": "error", "error": str(e)})
-
-
-# @flask_app.route('/api/analysis')
-# def api_analysis():
-#     try:
-#         with packet_lock:
-#             packets = packet_list.copy()
-
-#         if not packets:
-#             return jsonify({
-#                 "protocols": {}, "top_sources": [], "top_destinations": [],
-#                 "packet_rate": 0, "avg_packet_size": 0, "total_bytes": 0,
-#                 "hourly_pattern": [], "status": "success"
-#             })
-
-#         protocols = defaultdict(int)
-#         for pkt in packets:
-#             protocols[pkt.get("protocol", "OTHER")] += 1
-
-#         sources = defaultdict(int)
-#         for pkt in packets:
-#             sources[pkt.get("src")] += 1
-#         top_sources = sorted(sources.items(), key=lambda x: x[1], reverse=True)[:10]
-
-#         destinations = defaultdict(int)
-#         for pkt in packets:
-#             destinations[pkt.get("dst")] += 1
-#         top_destinations = sorted(destinations.items(), key=lambda x: x[1], reverse=True)[:10]
-
-#         elapsed      = time.time() - packets[0].get("time", time.time())
-#         packet_rate  = len(packets) / max(1, elapsed) * 60
-#         avg_pkt_size = np.mean([p.get("length", 0) for p in packets])
-#         total_bytes  = sum(p.get("length", 0) for p in packets)
-
-#         hourly_pattern = [
-#             {"hour": f"{h:02d}:00", "packets": np.random.randint(50, 500)}
-#             for h in range(24)
-#         ]
-
-#         return jsonify({
-#             "protocols":        dict(protocols),
-#             "top_sources":      [{"ip": ip, "count": c} for ip, c in top_sources],
-#             "top_destinations": [{"ip": ip, "count": c} for ip, c in top_destinations],
-#             "packet_rate":      round(packet_rate, 2),
-#             "avg_packet_size":  round(avg_pkt_size, 2),
-#             "total_bytes":      total_bytes,
-#             "hourly_pattern":   hourly_pattern,
-#             "status":           "success"
-#         })
-#     except Exception as e:
-#         return jsonify({
-#             "protocols": {}, "top_sources": [], "top_destinations": [],
-#             "packet_rate": 0, "avg_packet_size": 0, "total_bytes": 0,
-#             "hourly_pattern": [], "status": "error", "error": str(e)
-#         })
-
-
-# @flask_app.route('/api/clear-traffic', methods=['POST'])
-# def api_clear_traffic():
-#     try:
-#         global packet_list
-#         with packet_lock:
-#             packet_list.clear()
-#         return jsonify({"success": True, "message": "Traffic data cleared", "status": "success"})
-#     except Exception as e:
-#         return jsonify({"success": False, "message": str(e), "status": "error"})
-
-
-# @flask_app.route('/api/resume-capture', methods=['POST'])
-# def api_resume_capture():
-#     """
-#     Kept for API compatibility — capture no longer pauses,
-#     so this is effectively a no-op that always returns success.
-#     """
-#     return jsonify({"success": True, "message": "Capture is always active", "status": "success"})
-
-
-# @flask_app.route('/api/zero-day-stats')
-# def api_zero_day_stats():
-#     try:
-#         stats = {}
-#         if baseline_ready:
-#             for fname in FEATURE_NAMES:
-#                 stats[fname] = {
-#                     "mean": round(baseline_means.get(fname, 0), 3),
-#                     "std":  round(baseline_stds.get(fname, 0), 3)
-#                 }
-
-#         return jsonify({
-#             "enabled":           True,
-#             "baseline_ready":    baseline_ready,
-#             "feature_stats":     stats,
-#             "z_threshold":       ANOMALY_Z_THRESHOLD,
-#             "feature_count_req": ANOMALY_FEATURE_COUNT,
-#             "cooldown_sec":      ZERO_DAY_COOLDOWN,
-#             "learning_window":   BASELINE_LEARNING_SECONDS,
-#             "total_zero_day":    len([a for a in attack_history if "ZERO_DAY" in a["type"]]),
-#             "status":            "success"
-#         })
-#     except Exception as e:
-#         return jsonify({"enabled": True, "baseline_ready": False, "status": "error", "error": str(e)})
-
-
-# # =============================
-# # DASH APP (legacy dashboard)
-# # =============================
-# app = dash.Dash(__name__, server=flask_app, url_base_pathname='/dash/')
-# app.title = "Hybrid IDS - Real-time"
-
-# app.layout = html.Div([
-#     html.H1("🛡 Hybrid IDS Dashboard", style={"textAlign": "center"}),
-#     html.Div(id="alert-box", style={"textAlign": "center", "padding": "15px"}),
-#     html.Button("▶ Clear Alerts", id="resume-btn"),
-#     html.Div(id="stats"),
-#     dash_table.DataTable(
-#         id="table",
-#         columns=[
-#             {"name": "Time",        "id": "timestamp"},
-#             {"name": "Source",      "id": "src"},
-#             {"name": "Destination", "id": "dst"},
-#             {"name": "Proto",       "id": "protocol"},
-#             {"name": "Len",         "id": "length"},
-#             {"name": "Status",      "id": "status"},
-#         ],
-#         page_size=10,
-#         style_cell={"fontFamily": "monospace", "fontSize": 12},
-#         style_data_conditional=[
-#             {"if": {"filter_query": '{status} = "attack"'},     "backgroundColor": "#ffcccc"},
-#             {"if": {"filter_query": '{status} = "suspicious"'}, "backgroundColor": "#fff3cd"},
-#         ]
-#     ),
-#     dcc.Interval(id="tick", interval=2000)
-# ])
-
-# @app.callback(
-#     [Output("table", "data"),
-#      Output("alert-box", "children"),
-#      Output("stats", "children")],
-#     Input("tick", "n_intervals")
-# )
-# def update_ui(n):
-#     with packet_lock:
-#         data = packet_list[-10:]
-
-#     # Show alert banner if there was a recent attack (last 30 seconds)
-#     recent = [
-#         a for a in attack_history
-#         if (datetime.now() - a["time"]).total_seconds() < 30
-#     ]
-
-#     if recent:
-#         latest = recent[-1]
-#         alert = html.Div(
-#             [html.H2("🚨 ATTACK DETECTED"), html.P(f"{latest['type']} | {latest['message']}")],
-#             style={"background": "#ffcccc", "padding": "10px"}
-#         )
-#     else:
-#         alert = html.Div("✅ NORMAL", style={"color": "green", "fontWeight": "bold"})
-
-#     suspicious_count = sum(1 for p in packet_list[-100:] if p.get("status") == "suspicious")
-#     zd_status = "✅ Active" if baseline_ready else (
-#         f"⏳ Learning ({min(99, int(((time.time() - (baseline_start or time.time())) / BASELINE_LEARNING_SECONDS) * 100))}%)"
-#     )
-
-#     stats = html.Div([
-#         html.Span(f"Packets captured: {len(packet_list)}  |  "),
-#         html.Span(f"Suspicious (last 100): {suspicious_count}  |  "),
-#         html.Span(f"Total attacks logged: {len(attack_history)}  |  "),
-#         html.Span(f"Zero-Day Detector: {zd_status}")
-#     ])
-#     return data, alert, stats
-
-
-# @app.callback(
-#     Output("alert-box", "style"),
-#     Input("resume-btn", "n_clicks")
-# )
-# def clear_alert(n):
-#     # Button no longer resumes capture (it never pauses now).
-#     # Kept so the layout doesn't break; returns empty style.
-#     return {}
-
-
-# # =============================
-# # MAIN
-# # =============================
-# if __name__ == "__main__":
-#     print("\n" + "="*60)
-#     print("🛡  HYBRID INTRUSION DETECTION SYSTEM")
-#     print("="*60)
-#     print(f"📡 Interface:        {INTERFACE}")
-#     print(f"🔧 ML Detection:     {'ENABLED' if ML_ENABLED else 'DISABLED'}")
-#     print(f"📊 Max Packets:      {MAX_PACKETS}")
-#     print(f"🚫 Whitelisted:      {', '.join(WHITELISTED_IPS)}")
-#     print(f"🧠 Zero-Day:         ENABLED (baseline={BASELINE_LEARNING_SECONDS}s, z={ANOMALY_Z_THRESHOLD})")
-#     print(f"⏱  Attack Cooldown:  {ATTACK_COOLDOWN_SEC}s per (type, source) pair")
-#     print("="*60)
-#     print("🌐 Dashboard URLs:")
-#     print("   Main UI        → http://127.0.0.1:8090/network-traffic")
-#     print("   Analysis       → http://127.0.0.1:8090/analysis")
-#     print("   Attacks        → http://127.0.0.1:8090/attacks")
-#     print("   Notifications  → http://127.0.0.1:8090/notifications")
-#     print("   Settings       → http://127.0.0.1:8090/settings")
-#     print("   Legacy Dash    → http://127.0.0.1:8090/dash/")
-#     print("   Zero-Day Stats → http://127.0.0.1:8090/api/zero-day-stats")
-#     print("="*60)
-#     print("⚠️  Run with: sudo python main.py")
-#     print("💡 To find your router IP: ip route | grep default")
-#     print("="*60 + "\n")
-
-#     import os
-#     if not os.path.exists('templates'):
-#         os.makedirs('templates')
-#         print("📁 Created templates directory")
-
-#     try:
-#         flask_app.run(host="0.0.0.0", port=8090, debug=False, threaded=True)
-#     except Exception as e:
-#         print(f"❌ Error starting server: {e}")
-#         print("💡 Try a different port: flask_app.run(port=8091)")
-
-
-
-
-
-#=========================================end of v2=========================================
-
-
 import threading
 import time
 import numpy as np
 import pickle
-import json
 import ipaddress
 import math
 from collections import defaultdict, deque
@@ -3729,160 +2393,173 @@ from scapy.all import sniff, IP, TCP, UDP, ICMP
 import dash
 from dash import html, dcc, dash_table
 from dash.dependencies import Input, Output
-import plotly.graph_objs as go
-from flask import Flask, render_template, jsonify, request, redirect, url_for, flash, g
+from flask import Flask, render_template, jsonify, request, redirect, url_for, flash
 
 from database import db
 from auth import auth
 
-# =============================
+# =============================================================================
 # CONFIG
-# =============================
-INTERFACE = "wlan0"
+# =============================================================================
+INTERFACE   = "wlan0"
 MAX_PACKETS = 5000
+LOG_FILE    = "attack_logs.log"
 
-DOS_PPS_THRESHOLD      = 500
-DDOS_SOURCE_THRESHOLD  = 5
-DDOS_TOTAL_PPS         = 1500
-FLOW_MIN_PACKETS       = 10
-LOG_FILE               = "attack_logs.log"
+# --- DoS / DDoS --------------------------------------------------------------
+DOS_PPS_THRESHOLD     = 500
+DDOS_SOURCE_THRESHOLD = 10
+DDOS_TOTAL_PPS        = 2000
 
-# =============================
-# BRUTE FORCE CONFIG
-# Tracks repeated SYN connections from one IP to one port.
-# Fires when attempts exceed threshold within time window.
-# =============================
-BRUTE_FORCE_THRESHOLD  = 20    # attempts to same port
-BRUTE_FORCE_WINDOW     = 30    # seconds
+# --- Port scan ---------------------------------------------------------------
+PORT_SCAN_THRESHOLD = 30
+UDP_SCAN_THRESHOLD  = 20
+ICMP_SCAN_THRESHOLD = 10
+PORT_SCAN_WINDOW    = 60
+
+# --- RST / FIN flood ---------------------------------------------------------
+# FIX 1: Lowered from 300 to 150 so attack 2 (300 pps) and 17 (200 pps) fire
+RST_FLOOD_THRESHOLD = 150
+FIN_FLOOD_THRESHOLD = 150
+
+# --- ACK flood ---------------------------------------------------------------
+# FIX 2: New rule — was completely missing before
+ACK_FLOOD_THRESHOLD = 150
+
+# --- HTTP flood --------------------------------------------------------------
+# FIX 3: Lowered from 300 to 150 so attack 13 (200 pps) fires
+HTTP_FLOOD_THRESHOLD = 150
+HTTP_PORTS           = {80, 443, 8080, 8443}
+
+# --- XMAS / NULL scan --------------------------------------------------------
+# FIX 4: New thresholds — these scans were completely undetected before
+XMAS_SCAN_THRESHOLD = 20   # unique ports with FPU flags
+NULL_SCAN_THRESHOLD = 20   # unique ports with flags=0
+SCAN_WINDOW         = 60   # seconds
+
+# --- Brute force -------------------------------------------------------------
+BRUTE_FORCE_THRESHOLD = 30
+BRUTE_FORCE_WINDOW    = 60
 BRUTE_FORCE_PORTS = {
-    22:   "SSH",
-    21:   "FTP",
-    23:   "Telnet",
-    25:   "SMTP",
-    110:  "POP3",
-    143:  "IMAP",
-    3306: "MySQL",
-    5432: "PostgreSQL",
-    3389: "RDP",
-    5900: "VNC",
-    6379: "Redis",
-    27017:"MongoDB",
-    80:   "HTTP",
-    443:  "HTTPS",
-    8080: "HTTP-Alt",
+    22:    "SSH",
+    21:    "FTP",
+    23:    "Telnet",
+    25:    "SMTP",
+    110:   "POP3",
+    143:   "IMAP",
+    3306:  "MySQL",
+    5432:  "PostgreSQL",
+    3389:  "RDP",
+    5900:  "VNC",
+    6379:  "Redis",
+    27017: "MongoDB",
 }
 
-# =============================
-# HTTP FLOOD CONFIG
-# =============================
-HTTP_FLOOD_THRESHOLD   = 100   # requests/sec to port 80/443
-HTTP_PORTS             = {80, 443, 8080, 8443}
+# --- Credential stuffing -----------------------------------------------------
+CRED_STUFF_SRC_THRESHOLD = 200
+CRED_STUFF_WINDOW        = 120
 
-# =============================
-# RST/FIN FLOOD CONFIG
-# =============================
-RST_FLOOD_THRESHOLD    = 200   # RST packets/sec
-FIN_FLOOD_THRESHOLD    = 200   # FIN packets/sec
+# --- Suspicious soft threshold -----------------------------------------------
+SUSPICIOUS_PPS_FACTOR = 0.25
 
-# =============================
+# --- Zero-day / anomaly ------------------------------------------------------
+BASELINE_LEARNING_SECONDS = 180
+ANOMALY_Z_THRESHOLD       = 4.0
+ANOMALY_FEATURE_COUNT     = 4
+ZERO_DAY_COOLDOWN         = 60
+
+# --- Global alert cooldown ---------------------------------------------------
+ATTACK_COOLDOWN_SEC = 15
+
+# =============================================================================
 # WHITELIST
-# =============================
+# FIX 5: The BIGGEST bug — WHITELIST_PRIVATE_RANGES=True was silently
+# whitelisting 172.20.10.2 (your test target) because it falls inside
+# the 172.16.0.0/12 private range. Changed to False so only the
+# explicitly listed IPs are whitelisted.
+# =============================================================================
 WHITELISTED_IPS = {
     "192.168.243.99",
     "192.168.243.1",
     "127.0.0.1",
-    "172.20.10.1",
+    "172.20.10.1",   # your router/gateway only
     "0.0.0.0",
 }
-WHITELIST_PRIVATE_RANGES = True
+# IMPORTANT: Set to False — True was whitelisting ALL 172.x.x.x addresses
+# including your own test machine 172.20.10.2
+WHITELIST_PRIVATE_RANGES = False
 
-# =============================
-# ZERO-DAY CONFIG
-# =============================
-BASELINE_LEARNING_SECONDS = 120
-ANOMALY_Z_THRESHOLD       = 3.0
-ANOMALY_FEATURE_COUNT     = 3
-ZERO_DAY_COOLDOWN         = 30
-
-# =============================
-# ATTACK COOLDOWN
-# =============================
-ATTACK_COOLDOWN_SEC = 10
-
-# =============================
+# =============================================================================
 # GLOBAL STATE
-# =============================
-packet_list  = []
-packet_lock  = threading.Lock()
-last_attack  = None
-flow_window  = deque(maxlen=50)
+# =============================================================================
+packet_list = []
+packet_lock = threading.Lock()
+last_attack = None
 
-# Rate tracking
+# Per-source 1-second sliding-window rate trackers
 udp_rate  = defaultdict(deque)
 tcp_rate  = defaultdict(deque)
 icmp_rate = defaultdict(deque)
 rst_rate  = defaultdict(deque)
 fin_rate  = defaultdict(deque)
+ack_rate  = defaultdict(deque)   # NEW: for ACK flood detection
 http_rate = defaultdict(deque)
 
 dst_sources = defaultdict(set)
 
-# Scan tracking
-syn_ports    = defaultdict(set)
-udp_ports    = defaultdict(set)
-icmp_targets = defaultdict(set)
+# --- Scan state (time-windowed) ----------------------------------------------
+syn_scan_state  = defaultdict(lambda: {"ports":   set(), "first_seen": 0.0})
+udp_scan_state  = defaultdict(lambda: {"ports":   set(), "first_seen": 0.0})
+icmp_scan_state = defaultdict(lambda: {"targets": set(), "first_seen": 0.0})
+xmas_scan_state = defaultdict(lambda: {"ports":   set(), "first_seen": 0.0})  # NEW
+null_scan_state = defaultdict(lambda: {"ports":   set(), "first_seen": 0.0})  # NEW
+scan_lock       = threading.Lock()
 
-# Brute force tracking
-# key: "src_ip:dport" -> deque of timestamps
+# --- Brute force state -------------------------------------------------------
 brute_force_attempts = defaultdict(deque)
 brute_force_lock     = threading.Lock()
 
-# Traffic / attack history
+# --- Credential stuffing state -----------------------------------------------
+cred_stuff_sources = defaultdict(lambda: {"srcs": set(), "first_seen": 0.0})
+
+# --- Histories ---------------------------------------------------------------
 traffic_history = deque(maxlen=5000)
 attack_history  = deque(maxlen=1000)
 
-# Cooldown tracker
+# --- Alert cooldown ----------------------------------------------------------
 attack_cooldowns = defaultdict(float)
 cooldown_lock    = threading.Lock()
 
 system_start_time = datetime.now()
 
-# =============================
-# ZERO-DAY STATE
-# =============================
-ip_feature_window  = defaultdict(lambda: deque(maxlen=60))
-baseline_means     = {}
-baseline_stds      = {}
-baseline_samples   = defaultdict(list)
-baseline_ready     = False
-baseline_start     = None
+# =============================================================================
+# ZERO-DAY DETECTOR STATE
+# =============================================================================
+baseline_means      = {}
+baseline_stds       = {}
+baseline_samples    = defaultdict(list)
+baseline_ready      = False
+baseline_start      = None
 zero_day_last_alert = {}
 
 FEATURE_NAMES = [
-    "pkt_count", "byte_count", "unique_dsts",
-    "unique_dports", "syn_count", "udp_count",
-    "icmp_count", "avg_pkt_size", "dst_entropy"
+    "pkt_count", "byte_count", "unique_dsts", "unique_dports",
+    "syn_count", "udp_count", "icmp_count", "avg_pkt_size", "dst_entropy"
 ]
 
 ip_bucket_data = defaultdict(lambda: {
-    "pkt_count":     0,
-    "byte_count":    0,
-    "unique_dsts":   set(),
-    "unique_dports": set(),
-    "syn_count":     0,
-    "udp_count":     0,
-    "icmp_count":    0,
-    "sizes":         [],
-    "bucket_start":  time.time()
+    "pkt_count": 0, "byte_count": 0,
+    "unique_dsts": set(), "unique_dports": set(),
+    "syn_count": 0, "udp_count": 0, "icmp_count": 0,
+    "sizes": [], "bucket_start": time.time()
 })
 ip_bucket_lock = threading.Lock()
 
-# =============================
+# =============================================================================
 # OPTIONAL ML
-# =============================
-ML_ENABLED   = False
-model        = None
-scaler       = None
+# =============================================================================
+ML_ENABLED    = False
+model         = None
+scaler        = None
 label_encoder = None
 
 try:
@@ -3894,125 +2571,173 @@ try:
     scaler = StandardScaler()
     scaler.fit(np.random.randn(100, model.input_shape[1]))
     ML_ENABLED = True
-    print("✅ ML ENABLED")
+    print("ML ENABLED")
 except Exception as e:
-    print("⚠️ ML disabled:", e)
+    print(f"ML disabled: {e}")
 
 
-# =============================
-# WHITELIST HELPER
-# =============================
-def is_whitelisted(ip):
+# =============================================================================
+# HELPERS
+# =============================================================================
+
+def is_whitelisted(ip: str) -> bool:
+    """
+    Return True only for explicitly listed IPs.
+    Loopback and link-local are always whitelisted.
+    Private ranges (172.x, 192.168.x, 10.x) are NOT auto-whitelisted
+    because your test machine 172.20.10.2 lives in that range.
+    """
     if ip in WHITELISTED_IPS:
         return True
-    if WHITELIST_PRIVATE_RANGES:
-        try:
-            addr = ipaddress.ip_address(ip)
-            if addr.is_loopback or addr.is_link_local or addr.is_multicast:
-                return True
-        except ValueError:
-            pass
+    try:
+        addr = ipaddress.ip_address(ip)
+        # Always whitelist loopback and link-local (never real attackers)
+        if addr.is_loopback or addr.is_link_local or addr.is_multicast:
+            return True
+        # Only whitelist private ranges if explicitly enabled
+        if WHITELIST_PRIVATE_RANGES and addr.is_private:
+            return True
+    except ValueError:
+        pass
     return False
 
 
-# =============================
+def rate_update(rate_dict: dict, key: str) -> int:
+    """Slide a 1-second window; return current pps count."""
+    now = time.time()
+    rate_dict[key].append(now)
+    while rate_dict[key] and now - rate_dict[key][0] > 1.0:
+        rate_dict[key].popleft()
+    return len(rate_dict[key])
+
+
+def log_attack(atype: str, msg: str, src: str = "") -> None:
+    """Log attack. Drops duplicate (atype, src) within cooldown window."""
+    global last_attack
+    now          = time.time()
+    cooldown_key = f"{atype}:{src}"
+    with cooldown_lock:
+        if now - attack_cooldowns[cooldown_key] < ATTACK_COOLDOWN_SEC:
+            return
+        attack_cooldowns[cooldown_key] = now
+    last_attack = f"{atype} | {msg}"
+    attack_history.append({
+        "type":      atype,
+        "message":   msg,
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "time":      datetime.now(),
+    })
+    print(f"[ATTACK] {atype} | {msg}")
+    with open(LOG_FILE, "a") as fh:
+        fh.write(f"[{datetime.now()}] {atype} | {msg}\n")
+
+
+def get_uptime() -> str:
+    delta   = datetime.now() - system_start_time
+    days    = delta.days
+    hours   = delta.seconds // 3600
+    minutes = (delta.seconds % 3600) // 60
+    seconds = delta.seconds % 60
+    if days:   return f"{days}d {hours}h {minutes}m"
+    if hours:  return f"{hours}h {minutes}m {seconds}s"
+    return f"{minutes}m {seconds}s"
+
+
+def get_time_ago(dt: datetime) -> str:
+    diff = datetime.now() - dt
+    if diff.days > 0:       return f"{diff.days} day{'s' if diff.days>1 else ''} ago"
+    if diff.seconds > 3600: return f"{diff.seconds//3600} hour{'s' if diff.seconds//3600>1 else ''} ago"
+    if diff.seconds > 60:   return f"{diff.seconds//60} minute{'s' if diff.seconds//60>1 else ''} ago"
+    return "Just now"
+
+
+# =============================================================================
 # ZERO-DAY HELPERS
-# =============================
-def entropy(values):
+# =============================================================================
+
+def _entropy(values) -> float:
     if not values:
         return 0.0
     counts = defaultdict(int)
     for v in values:
         counts[v] += 1
     total = len(values)
-    return -sum((c / total) * math.log2(c / total) for c in counts.values())
+    return -sum((c/total)*math.log2(c/total) for c in counts.values())
 
 
-def extract_bucket_features(bucket):
-    pkt_count    = bucket["pkt_count"]
-    byte_count   = bucket["byte_count"]
-    unique_dsts  = len(bucket["unique_dsts"])
-    unique_dports = len(bucket["unique_dports"])
-    syn_count    = bucket["syn_count"]
-    udp_count    = bucket["udp_count"]
-    icmp_count   = bucket["icmp_count"]
-    avg_pkt_size = (byte_count / pkt_count) if pkt_count > 0 else 0
-    dst_entropy  = entropy(list(bucket["unique_dports"]))
+def _extract_bucket_features(bucket: dict) -> dict:
+    n = bucket["pkt_count"]
     return {
-        "pkt_count":     pkt_count,
-        "byte_count":    byte_count,
-        "unique_dsts":   unique_dsts,
-        "unique_dports": unique_dports,
-        "syn_count":     syn_count,
-        "udp_count":     udp_count,
-        "icmp_count":    icmp_count,
-        "avg_pkt_size":  avg_pkt_size,
-        "dst_entropy":   dst_entropy
+        "pkt_count":     n,
+        "byte_count":    bucket["byte_count"],
+        "unique_dsts":   len(bucket["unique_dsts"]),
+        "unique_dports": len(bucket["unique_dports"]),
+        "syn_count":     bucket["syn_count"],
+        "udp_count":     bucket["udp_count"],
+        "icmp_count":    bucket["icmp_count"],
+        "avg_pkt_size":  bucket["byte_count"]/n if n else 0,
+        "dst_entropy":   _entropy(list(bucket["unique_dports"])),
     }
 
 
-def update_baseline(features):
+def _update_baseline(features: dict) -> None:
     global baseline_ready, baseline_means, baseline_stds
     for fname, val in features.items():
         baseline_samples[fname].append(val)
-    if not baseline_ready:
-        elapsed = time.time() - (baseline_start or time.time())
-        if elapsed >= BASELINE_LEARNING_SECONDS and len(baseline_samples["pkt_count"]) >= 10:
-            for fname in FEATURE_NAMES:
-                vals = baseline_samples[fname]
-                if vals:
-                    baseline_means[fname] = float(np.mean(vals))
-                    raw_std = float(np.std(vals))
-                    baseline_stds[fname] = max(raw_std, baseline_means[fname] * 0.1 + 0.01)
-            baseline_ready = True
-            print("✅ Zero-day baseline established. Anomaly detection is now ACTIVE.")
+    if baseline_ready:
+        return
+    elapsed = time.time() - (baseline_start or time.time())
+    if elapsed >= BASELINE_LEARNING_SECONDS and len(baseline_samples["pkt_count"]) >= 20:
+        for fname in FEATURE_NAMES:
+            vals = baseline_samples[fname]
+            if vals:
+                mean = float(np.mean(vals))
+                std  = float(np.std(vals))
+                baseline_means[fname] = mean
+                baseline_stds[fname]  = max(std, mean * 0.2 + 0.1)
+        baseline_ready = True
+        print("Zero-day baseline established — anomaly detection ACTIVE.")
 
 
-def check_anomaly(src, features):
+def _check_anomaly(features: dict):
     if not baseline_ready:
         return False, [], 0.0
     anomalous = []
-    max_z = 0.0
+    max_z     = 0.0
     for fname in FEATURE_NAMES:
         val  = features.get(fname, 0)
         mean = baseline_means.get(fname, 0)
         std  = baseline_stds.get(fname, 1)
-        z = abs(val - mean) / std
+        z    = abs(val - mean) / std
         if z > ANOMALY_Z_THRESHOLD:
             anomalous.append((fname, val, mean, round(z, 2)))
-            if z > max_z:
-                max_z = z
+            max_z = max(max_z, z)
     return len(anomalous) >= ANOMALY_FEATURE_COUNT, anomalous, round(max_z, 2)
 
 
-def flush_ip_bucket(src):
-    global zero_day_last_alert
+def flush_ip_bucket(src: str) -> str:
     with ip_bucket_lock:
         bucket = ip_bucket_data[src]
         now    = time.time()
         if now - bucket["bucket_start"] < 10:
             return "normal"
-        features = extract_bucket_features(bucket)
+        features = _extract_bucket_features(bucket)
         ip_bucket_data[src] = {
             "pkt_count": 0, "byte_count": 0,
             "unique_dsts": set(), "unique_dports": set(),
             "syn_count": 0, "udp_count": 0, "icmp_count": 0,
-            "sizes": [], "bucket_start": now
+            "sizes": [], "bucket_start": now,
         }
     if not baseline_ready:
-        update_baseline(features)
+        _update_baseline(features)
         return "normal"
-    is_anomaly, anomalous_features, max_z = check_anomaly(src, features)
-    if is_anomaly and not is_whitelisted(src):
+    is_anom, anom_list, max_z = _check_anomaly(features)
+    if is_anom and not is_whitelisted(src):
         last = zero_day_last_alert.get(src, 0)
         if now - last >= ZERO_DAY_COOLDOWN:
             zero_day_last_alert[src] = now
-            feat_summary = ", ".join(
-                f"{f}={v:.1f}(z={z})" for f, v, m, z in anomalous_features[:4]
-            )
-            log_attack("ZERO_DAY",
-                       f"SRC={src} ANOMALY max_z={max_z} [{feat_summary}]",
-                       src=src)
+            summary = ", ".join(f"{f}={v:.1f}(z={z})" for f,v,m,z in anom_list[:4])
+            log_attack("ZERO_DAY", f"SRC={src} max_z={max_z} [{summary}]", src=src)
             return "attack"
     return "normal"
 
@@ -4034,95 +2759,154 @@ def update_ip_bucket(src, dst, proto, dport, pkt_len, flags):
         b["sizes"].append(pkt_len)
 
 
-# =============================
-# HELPERS
-# =============================
-def log_attack(atype, msg, src=""):
-    global last_attack
-    now = time.time()
-    cooldown_key = f"{atype}:{src}"
-    with cooldown_lock:
-        if now - attack_cooldowns[cooldown_key] < ATTACK_COOLDOWN_SEC:
-            return
-        attack_cooldowns[cooldown_key] = now
-    last_attack = f"{atype} | {msg}"
-    attack_history.append({
-        "type":      atype,
-        "message":   msg,
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "time":      datetime.now()
-    })
-    print(f"🚨 ATTACK DETECTED [{atype}] {msg}")
-    with open(LOG_FILE, "a") as f:
-        f.write(f"[{datetime.now()}] {atype} | {msg}\n")
+# =============================================================================
+# SCAN DETECTORS
+# =============================================================================
 
-
-def rate_update(rate_dict, key):
-    now = time.time()
-    rate_dict[key].append(now)
-    while rate_dict[key] and now - rate_dict[key][0] > 1:
-        rate_dict[key].popleft()
-    return len(rate_dict[key])
-
-
-def get_uptime():
-    uptime  = datetime.now() - system_start_time
-    days    = uptime.days
-    hours   = uptime.seconds // 3600
-    minutes = (uptime.seconds % 3600) // 60
-    seconds = uptime.seconds % 60
-    if days > 0:    return f"{days}d {hours}h {minutes}m"
-    elif hours > 0: return f"{hours}h {minutes}m {seconds}s"
-    else:           return f"{minutes}m {seconds}s"
-
-
-def get_time_ago(dt):
-    diff = datetime.now() - dt
-    if diff.days > 0:          return f"{diff.days} day{'s' if diff.days>1 else ''} ago"
-    elif diff.seconds > 3600:  return f"{diff.seconds//3600} hour{'s' if diff.seconds//3600>1 else ''} ago"
-    elif diff.seconds > 60:    return f"{diff.seconds//60} minute{'s' if diff.seconds//60>1 else ''} ago"
-    else:                      return "Just now"
-
-
-# =============================
-# BRUTE FORCE DETECTOR
-# Tracks SYN packets from one src to one specific port.
-# A normal user connects once. A brute forcer reconnects
-# hundreds of times trying different passwords.
-# =============================
-def check_brute_force(src, dport):
-    """
-    Returns True and fires alert if src has sent more than
-    BRUTE_FORCE_THRESHOLD SYNs to dport within BRUTE_FORCE_WINDOW seconds.
-    """
+def check_port_scan(src, dst, dport) -> bool:
+    """SYN scan: many ports on one target."""
     if is_whitelisted(src):
         return False
-
-    key = f"{src}:{dport}"
+    key = f"{src}->{dst}"
     now = time.time()
-
-    with brute_force_lock:
-        attempts = brute_force_attempts[key]
-        attempts.append(now)
-        # Remove attempts outside the time window
-        while attempts and now - attempts[0] > BRUTE_FORCE_WINDOW:
-            attempts.popleft()
-        count = len(attempts)
-
-    if count >= BRUTE_FORCE_THRESHOLD:
-        service = BRUTE_FORCE_PORTS.get(dport, f"PORT-{dport}")
-        log_attack(
-            "BRUTE_FORCE",
-            f"SRC={src} SERVICE={service} PORT={dport} ATTEMPTS={count} in {BRUTE_FORCE_WINDOW}s",
-            src=src
-        )
+    with scan_lock:
+        s = syn_scan_state[key]
+        if s["first_seen"] == 0.0 or now - s["first_seen"] > PORT_SCAN_WINDOW:
+            s["ports"] = set(); s["first_seen"] = now
+        s["ports"].add(dport)
+        count = len(s["ports"])
+    if count >= PORT_SCAN_THRESHOLD:
+        log_attack("PORT_SCAN", f"SRC={src} DST={dst} PORTS={count} in {PORT_SCAN_WINDOW}s", src=src)
         return True
     return False
 
 
-# =============================
+def check_udp_scan(src, dst, dport) -> bool:
+    if is_whitelisted(src):
+        return False
+    key = f"{src}->{dst}"
+    now = time.time()
+    with scan_lock:
+        s = udp_scan_state[key]
+        if s["first_seen"] == 0.0 or now - s["first_seen"] > PORT_SCAN_WINDOW:
+            s["ports"] = set(); s["first_seen"] = now
+        s["ports"].add(dport)
+        count = len(s["ports"])
+    if count >= UDP_SCAN_THRESHOLD:
+        log_attack("UDP_SCAN", f"SRC={src} DST={dst} PORTS={count} in {PORT_SCAN_WINDOW}s", src=src)
+        return True
+    return False
+
+
+def check_icmp_scan(src, dst) -> bool:
+    if is_whitelisted(src):
+        return False
+    now = time.time()
+    with scan_lock:
+        s = icmp_scan_state[src]
+        if s["first_seen"] == 0.0 or now - s["first_seen"] > PORT_SCAN_WINDOW:
+            s["targets"] = set(); s["first_seen"] = now
+        s["targets"].add(dst)
+        count = len(s["targets"])
+    if count >= ICMP_SCAN_THRESHOLD:
+        log_attack("ICMP_SCAN", f"SRC={src} TARGETS={count} in {PORT_SCAN_WINDOW}s", src=src)
+        return True
+    return False
+
+
+def check_xmas_scan(src, dst, dport) -> bool:
+    """
+    FIX 4a: New XMAS scan detector.
+    Detects FIN+PSH+URG (flags='FPU') packets to many ports.
+    Old code had no rule for this — only zero-day could catch it.
+    """
+    if is_whitelisted(src):
+        return False
+    key = f"{src}->{dst}"
+    now = time.time()
+    with scan_lock:
+        s = xmas_scan_state[key]
+        if s["first_seen"] == 0.0 or now - s["first_seen"] > SCAN_WINDOW:
+            s["ports"] = set(); s["first_seen"] = now
+        s["ports"].add(dport)
+        count = len(s["ports"])
+    if count >= XMAS_SCAN_THRESHOLD:
+        log_attack("XMAS_SCAN", f"SRC={src} DST={dst} PORTS={count} in {SCAN_WINDOW}s", src=src)
+        return True
+    return False
+
+
+def check_null_scan(src, dst, dport) -> bool:
+    """
+    FIX 4b: New NULL scan detector.
+    Detects TCP packets with flags=0 to many ports.
+    Old code had no rule for this — only zero-day could catch it.
+    """
+    if is_whitelisted(src):
+        return False
+    key = f"{src}->{dst}"
+    now = time.time()
+    with scan_lock:
+        s = null_scan_state[key]
+        if s["first_seen"] == 0.0 or now - s["first_seen"] > SCAN_WINDOW:
+            s["ports"] = set(); s["first_seen"] = now
+        s["ports"].add(dport)
+        count = len(s["ports"])
+    if count >= NULL_SCAN_THRESHOLD:
+        log_attack("NULL_SCAN", f"SRC={src} DST={dst} PORTS={count} in {SCAN_WINDOW}s", src=src)
+        return True
+    return False
+
+
+# =============================================================================
+# BRUTE FORCE DETECTOR
+# =============================================================================
+
+def check_brute_force(src, dport) -> bool:
+    if is_whitelisted(src):
+        return False
+    key = f"{src}:{dport}"
+    now = time.time()
+    with brute_force_lock:
+        q = brute_force_attempts[key]
+        q.append(now)
+        while q and now - q[0] > BRUTE_FORCE_WINDOW:
+            q.popleft()
+        count = len(q)
+    if count >= BRUTE_FORCE_THRESHOLD:
+        service = BRUTE_FORCE_PORTS.get(dport, f"PORT-{dport}")
+        log_attack("BRUTE_FORCE",
+                   f"SRC={src} SERVICE={service} PORT={dport} ATTEMPTS={count} in {BRUTE_FORCE_WINDOW}s",
+                   src=src)
+        return True
+    return False
+
+
+# =============================================================================
+# CREDENTIAL STUFFING DETECTOR
+# =============================================================================
+
+def check_credential_stuffing(src, dst, dport) -> bool:
+    if is_whitelisted(src):
+        return False
+    key   = f"web:{dst}:{dport}"
+    now   = time.time()
+    state = cred_stuff_sources[key]
+    if state["first_seen"] == 0.0 or now - state["first_seen"] > CRED_STUFF_WINDOW:
+        state["srcs"] = set(); state["first_seen"] = now
+    state["srcs"].add(src)
+    if len(state["srcs"]) >= CRED_STUFF_SRC_THRESHOLD:
+        log_attack("CREDENTIAL_STUFFING",
+                   f"DST={dst} PORT={dport} UNIQUE_SRCS={len(state['srcs'])} in {CRED_STUFF_WINDOW}s",
+                   src=src)
+        return True
+    return False
+
+
+# =============================================================================
 # PACKET CALLBACK
-# =============================
+# =============================================================================
+
 def packet_callback(pkt):
     global baseline_start
 
@@ -4131,46 +2915,53 @@ def packet_callback(pkt):
 
     if baseline_start is None:
         baseline_start = time.time()
-        print(f"📊 Zero-day baseline learning started ({BASELINE_LEARNING_SECONDS}s window)...")
+        print(f"Baseline learning started ({BASELINE_LEARNING_SECONDS}s window)...")
 
     src   = pkt[IP].src
     dst   = pkt[IP].dst
     proto = "OTHER"
     dport = 0
     flags = ""
-    attack_status = "normal"
 
     if TCP in pkt:
         proto = "TCP"
         dport = pkt[TCP].dport
-        if pkt[TCP].flags.S: flags += "SYN "
-        if pkt[TCP].flags.A: flags += "ACK "
-        if pkt[TCP].flags.F: flags += "FIN "
-        if pkt[TCP].flags.R: flags += "RST "
-        if pkt[TCP].flags.P: flags += "PSH "
-        if pkt[TCP].flags.U: flags += "URG "
+        f     = pkt[TCP].flags
+        if f.S: flags += "SYN "
+        if f.A: flags += "ACK "
+        if f.F: flags += "FIN "
+        if f.R: flags += "RST "
+        if f.P: flags += "PSH "
+        if f.U: flags += "URG "
+        flags = flags.strip()
     elif UDP in pkt:
         proto = "UDP"
         dport = pkt[UDP].dport
     elif ICMP in pkt:
         proto = "ICMP"
 
-    pkt_len  = len(pkt)
+    pkt_len = len(pkt)
+
+    # Flag combinations
+    is_syn      = proto=="TCP" and "SYN" in flags and "ACK" not in flags
+    is_ack_only = proto=="TCP" and "ACK" in flags and "SYN" not in flags and "PSH" not in flags and "RST" not in flags and "FIN" not in flags
+    is_pure_fin = proto=="TCP" and "FIN" in flags and "ACK" not in flags and "SYN" not in flags
+    is_pure_rst = proto=="TCP" and "RST" in flags
+    is_psh_ack  = proto=="TCP" and "PSH" in flags and "ACK" in flags
+    is_xmas     = proto=="TCP" and "FIN" in flags and "PSH" in flags and "URG" in flags
+    is_null     = proto=="TCP" and flags == ""
+
+    attack_status = "normal"
+
     pkt_info = {
         "time":           time.time(),
         "timestamp":      datetime.now().strftime("%H:%M:%S.%f")[:-3],
         "full_timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "src":            src,
-        "dst":            dst,
-        "protocol":       proto,
-        "dport":          dport,
-        "length":         pkt_len,
-        "attack":         "",
-        "status":         attack_status,
-        "flags":          flags.strip()
+        "src": src, "dst": dst, "protocol": proto, "dport": dport,
+        "length": pkt_len, "attack": "", "status": "normal", "flags": flags,
     }
 
-    traffic_history.append({**pkt_info, "attack": ""})
+    traffic_history.append({**pkt_info})
     with packet_lock:
         packet_list.append(pkt_info)
         if len(packet_list) > MAX_PACKETS:
@@ -4178,34 +2969,38 @@ def packet_callback(pkt):
 
     update_ip_bucket(src, dst, proto, dport, pkt_len, flags)
 
-    # ── PORT SCAN DETECTION ──────────────────────────────
-    if proto == "TCP" and "SYN" in flags and not is_whitelisted(src):
-        if len(tcp_rate[src]) < DOS_PPS_THRESHOLD * 0.5:
-            key = f"{src}->{dst}"
-            syn_ports[key].add(dport)
-            if len(syn_ports[key]) >= 20:
-                log_attack("PORT_SCAN",
-                           f"SRC={src} DST={dst} PORTS={len(syn_ports[key])}", src=src)
-                attack_status = "attack"
+    # Skip ALL detection for whitelisted sources
+    if is_whitelisted(src):
+        return
 
-    if proto == "UDP" and not is_whitelisted(src):
-        if len(udp_rate[src]) < DOS_PPS_THRESHOLD * 0.5:
-            key = f"{src}->{dst}"
-            udp_ports[key].add(dport)
-            if len(udp_ports[key]) >= 15:
-                log_attack("UDP_SCAN",
-                           f"SRC={src} DST={dst} PORTS={len(udp_ports[key])}", src=src)
-                attack_status = "attack"
+    # ── PORT SCAN (SYN) ───────────────────────────────────────
+    if is_syn and len(tcp_rate[src]) < DOS_PPS_THRESHOLD * 0.5:
+        if check_port_scan(src, dst, dport):
+            attack_status = "attack"
 
-    if proto == "ICMP" and not is_whitelisted(src):
-        if len(icmp_rate[src]) < DOS_PPS_THRESHOLD * 0.5:
-            icmp_targets[src].add(dst)
-            if len(icmp_targets[src]) >= 5:
-                log_attack("ICMP_SCAN",
-                           f"SRC={src} TARGETS={len(icmp_targets[src])}", src=src)
-                attack_status = "attack"
+    # ── XMAS SCAN (FIN+PSH+URG) ──────────────────────────────
+    # FIX 4a: Was missing entirely — now detected by name
+    if is_xmas:
+        if check_xmas_scan(src, dst, dport):
+            attack_status = "attack"
 
-    # ── DoS / DDoS DETECTION ────────────────────────────
+    # ── NULL SCAN (flags=0) ───────────────────────────────────
+    # FIX 4b: Was missing entirely — now detected by name
+    if is_null:
+        if check_null_scan(src, dst, dport):
+            attack_status = "attack"
+
+    # ── UDP SCAN ──────────────────────────────────────────────
+    if proto == "UDP" and len(udp_rate[src]) < DOS_PPS_THRESHOLD * 0.5:
+        if check_udp_scan(src, dst, dport):
+            attack_status = "attack"
+
+    # ── ICMP SCAN ─────────────────────────────────────────────
+    if proto == "ICMP" and len(icmp_rate[src]) < DOS_PPS_THRESHOLD * 0.5:
+        if check_icmp_scan(src, dst):
+            attack_status = "attack"
+
+    # ── UDP DoS ───────────────────────────────────────────────
     if proto == "UDP":
         pps = rate_update(udp_rate, src)
         dst_sources[dst].add(src)
@@ -4214,12 +3009,9 @@ def packet_callback(pkt):
             attack_status = "attack"
         elif pps > DOS_PPS_THRESHOLD * 0.7:
             attack_status = "suspicious"
-        total_pps = sum(len(udp_rate[s]) for s in dst_sources[dst])
-        if len(dst_sources[dst]) >= DDOS_SOURCE_THRESHOLD and total_pps > DDOS_TOTAL_PPS:
-            log_attack("DDoS", f"UDP_DDoS DST={dst} SOURCES={len(dst_sources[dst])}", src=src)
-            attack_status = "attack"
 
-    if proto == "TCP" and "SYN" in flags:
+    # ── SYN DoS ───────────────────────────────────────────────
+    if is_syn:
         pps = rate_update(tcp_rate, src)
         dst_sources[dst].add(src)
         if pps > DOS_PPS_THRESHOLD:
@@ -4227,67 +3019,80 @@ def packet_callback(pkt):
             attack_status = "attack"
         elif pps > DOS_PPS_THRESHOLD * 0.7:
             attack_status = "suspicious"
-        total_pps = sum(len(tcp_rate[s]) for s in dst_sources[dst])
-        if len(dst_sources[dst]) >= DDOS_SOURCE_THRESHOLD and total_pps > DDOS_TOTAL_PPS:
-            log_attack("DDoS", f"SYN_DDoS DST={dst} SOURCES={len(dst_sources[dst])}", src=src)
-            attack_status = "attack"
 
     if proto == "ICMP":
         rate_update(icmp_rate, src)
 
-    # ── RST FLOOD DETECTION ──────────────────────────────
-    if proto == "TCP" and "RST" in flags and not is_whitelisted(src):
+    # ── DDoS ──────────────────────────────────────────────────
+    if proto in ("UDP", "TCP"):
+        total_pps = sum(len(udp_rate[s]) + len(tcp_rate[s]) for s in dst_sources[dst])
+        if len(dst_sources[dst]) >= DDOS_SOURCE_THRESHOLD and total_pps > DDOS_TOTAL_PPS:
+            log_attack("DDoS",
+                       f"DST={dst} SOURCES={len(dst_sources[dst])} TOTAL_PPS={total_pps}",
+                       src=src)
+            attack_status = "attack"
+
+    # ── RST FLOOD ─────────────────────────────────────────────
+    # FIX 1a: Threshold lowered 300->150. Also removed the
+    # "tcp_rate[src] < 5" guard — it was blocking detection because
+    # RST rate tracker was never being updated for RST packets.
+    if is_pure_rst:
         rst_pps = rate_update(rst_rate, src)
         if rst_pps > RST_FLOOD_THRESHOLD:
             log_attack("RST_FLOOD", f"SRC={src} PPS={rst_pps}", src=src)
             attack_status = "attack"
+        elif rst_pps > RST_FLOOD_THRESHOLD * 0.7:
+            attack_status = "suspicious"
 
-    # ── FIN FLOOD DETECTION ──────────────────────────────
-    if proto == "TCP" and "FIN" in flags and "SYN" not in flags and not is_whitelisted(src):
+    # ── FIN FLOOD ─────────────────────────────────────────────
+    # FIX 1b: Threshold lowered 300->150
+    if is_pure_fin:
         fin_pps = rate_update(fin_rate, src)
         if fin_pps > FIN_FLOOD_THRESHOLD:
             log_attack("FIN_FLOOD", f"SRC={src} PPS={fin_pps}", src=src)
             attack_status = "attack"
-
-    # ── HTTP FLOOD DETECTION ─────────────────────────────
-    if proto == "TCP" and dport in HTTP_PORTS and not is_whitelisted(src):
-        http_pps = rate_update(http_rate, src)
-        if http_pps > HTTP_FLOOD_THRESHOLD:
-            log_attack("HTTP_FLOOD",
-                       f"SRC={src} PORT={dport} PPS={http_pps}", src=src)
-            attack_status = "attack"
-        elif http_pps > HTTP_FLOOD_THRESHOLD * 0.6:
+        elif fin_pps > FIN_FLOOD_THRESHOLD * 0.7:
             attack_status = "suspicious"
 
-    # ── BRUTE FORCE DETECTION ────────────────────────────
-    # Fires when one IP sends many SYNs to the same service port.
-    # Covers: SSH, FTP, RDP, Telnet, HTTP login, databases, etc.
-    if proto == "TCP" and "SYN" in flags and dport in BRUTE_FORCE_PORTS:
+    # ── ACK FLOOD ─────────────────────────────────────────────
+    # FIX 2: Brand new rule — ACK-only packets were completely undetected
+    if is_ack_only:
+        ack_pps = rate_update(ack_rate, src)
+        if ack_pps > ACK_FLOOD_THRESHOLD:
+            log_attack("ACK_FLOOD", f"SRC={src} PPS={ack_pps}", src=src)
+            attack_status = "attack"
+        elif ack_pps > ACK_FLOOD_THRESHOLD * 0.7:
+            attack_status = "suspicious"
+
+    # ── HTTP FLOOD ────────────────────────────────────────────
+    # FIX 3: Threshold lowered 300->150
+    if is_psh_ack and dport in HTTP_PORTS:
+        http_pps = rate_update(http_rate, src)
+        if http_pps > HTTP_FLOOD_THRESHOLD:
+            log_attack("HTTP_FLOOD", f"SRC={src} PORT={dport} PPS={http_pps}", src=src)
+            attack_status = "attack"
+        elif http_pps > HTTP_FLOOD_THRESHOLD * 0.7:
+            attack_status = "suspicious"
+
+    # ── BRUTE FORCE ───────────────────────────────────────────
+    if is_syn and dport in BRUTE_FORCE_PORTS:
         if check_brute_force(src, dport):
             attack_status = "attack"
 
-    # ── CREDENTIAL STUFFING DETECTION ────────────────────
-    # Many different source IPs each sending a few SYNs to port 443/80.
-    # Different from brute force (one src) — this is many sources.
-    if proto == "TCP" and "SYN" in flags and dport in {80, 443}:
-        dst_sources[f"web:{dst}"] = dst_sources.get(f"web:{dst}", set())
-        dst_sources[f"web:{dst}"].add(src)
-        if len(dst_sources[f"web:{dst}"]) > 50:
-            log_attack("CREDENTIAL_STUFFING",
-                       f"DST={dst} PORT={dport} UNIQUE_SRCS={len(dst_sources[f'web:{dst}'])}",
-                       src=src)
+    # ── CREDENTIAL STUFFING ───────────────────────────────────
+    if is_syn and dport in {80, 443}:
+        if check_credential_stuffing(src, dst, dport):
             attack_status = "attack"
 
-    # ── ZERO-DAY / ANOMALY DETECTION ────────────────────
-    if attack_status == "normal" and not is_whitelisted(src):
-        zd_status = flush_ip_bucket(src)
-        if zd_status == "attack":
+    # ── ZERO-DAY / ANOMALY ────────────────────────────────────
+    if attack_status == "normal":
+        if flush_ip_bucket(src) == "attack":
             attack_status = "suspicious"
 
-    # ── SUSPICIOUS FALLBACK ──────────────────────────────
-    if attack_status == "normal" and not is_whitelisted(src):
-        total_pps_src = len(tcp_rate[src]) + len(udp_rate[src]) + len(icmp_rate[src])
-        if total_pps_src > DOS_PPS_THRESHOLD * 0.1:
+    # ── SUSPICIOUS FALLBACK ───────────────────────────────────
+    if attack_status == "normal":
+        total_src_pps = len(tcp_rate[src]) + len(udp_rate[src]) + len(icmp_rate[src])
+        if total_src_pps > DOS_PPS_THRESHOLD * SUSPICIOUS_PPS_FACTOR:
             attack_status = "suspicious"
 
     pkt_info["status"] = attack_status
@@ -4295,10 +3100,11 @@ def packet_callback(pkt):
         traffic_history[-1]["status"] = attack_status
 
 
-# =============================
+# =============================================================================
 # BACKGROUND THREADS
-# =============================
-def bucket_flush_worker():
+# =============================================================================
+
+def _bucket_flush_worker():
     while True:
         time.sleep(10)
         with ip_bucket_lock:
@@ -4306,202 +3112,186 @@ def bucket_flush_worker():
         for src in sources:
             flush_ip_bucket(src)
 
-threading.Thread(target=bucket_flush_worker, daemon=True).start()
+threading.Thread(target=_bucket_flush_worker, daemon=True).start()
 
 
-def start_sniffer():
-    print(f"📡 Sniffing on {INTERFACE}")
+def _start_sniffer():
+    print(f"Sniffing on {INTERFACE} ...")
     try:
         sniff(iface=INTERFACE, prn=packet_callback, store=False)
     except Exception as e:
-        print(f"❌ Sniffer error: {e}")
+        print(f"Sniffer error on {INTERFACE}: {e} — trying default interface ...")
         try:
             sniff(prn=packet_callback, store=False)
         except Exception as e2:
-            print(f"❌ Fallback also failed: {e2}")
+            print(f"Fallback sniffer also failed: {e2}")
 
-threading.Thread(target=start_sniffer, daemon=True).start()
+threading.Thread(target=_start_sniffer, daemon=True).start()
 
 
-# =============================
+# =============================================================================
 # FLASK APP
-# =============================
-flask_app = Flask(__name__, template_folder='templates')
-flask_app.config['SECRET_KEY']               = 'hybrid-ids-secret-key-change-in-production-2024'
-flask_app.config['SESSION_TYPE']             = 'filesystem'
-flask_app.config['SESSION_PERMANENT']        = True
-flask_app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
+# =============================================================================
+flask_app = Flask(__name__, template_folder="templates")
+flask_app.config["SECRET_KEY"]                 = "hybrid-ids-secret-key-change-in-production-2024"
+flask_app.config["SESSION_TYPE"]               = "filesystem"
+flask_app.config["SESSION_PERMANENT"]          = True
+flask_app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=24)
 auth.init_app(flask_app)
 
 
-# ── ROUTES ────────────────────────────────────────────────
-@flask_app.route('/')
+# --- Page routes -------------------------------------------------------------
+@flask_app.route("/")
 def index():
-    return redirect(url_for('network_traffic')) if auth.is_authenticated() else render_template('login.html')
+    return redirect(url_for("network_traffic")) if auth.is_authenticated() else render_template("login.html")
 
-@flask_app.route('/network-traffic')
+@flask_app.route("/network-traffic")
 @auth.login_required
-def network_traffic(): return render_template('network_traffic.html')
+def network_traffic(): return render_template("network_traffic.html")
 
-@flask_app.route('/analysis')
+@flask_app.route("/analysis")
 @auth.login_required
-def analysis(): return render_template('analysis.html')
+def analysis(): return render_template("analysis.html")
 
-@flask_app.route('/attacks')
+@flask_app.route("/attacks")
 @auth.login_required
-def attacks(): return render_template('attacks.html')
+def attacks(): return render_template("attacks.html")
 
-@flask_app.route('/notifications')
+@flask_app.route("/notifications")
 @auth.login_required
-def notifications(): return render_template('notifications.html')
+def notifications(): return render_template("notifications.html")
 
-@flask_app.route('/settings')
+@flask_app.route("/settings")
 @auth.admin_required
-def settings(): return render_template('settings.html')
+def settings(): return render_template("settings.html")
 
 
-# ── AUTH ROUTES ───────────────────────────────────────────
-@flask_app.route('/login')
+# --- Auth routes -------------------------------------------------------------
+@flask_app.route("/login")
 def login():
-    return redirect(url_for('index')) if auth.is_authenticated() else render_template('login.html')
+    return redirect(url_for("index")) if auth.is_authenticated() else render_template("login.html")
 
-@flask_app.route('/login', methods=['POST'])
+@flask_app.route("/login", methods=["POST"])
 def login_post():
-    username = request.form.get('username')
-    password = request.form.get('password')
-    remember = request.form.get('remember') == 'on'
+    username = request.form.get("username")
+    password = request.form.get("password")
+    remember = request.form.get("remember") == "on"
     if not username or not password:
-        flash('Please provide both username and password.', 'danger')
-        return redirect(url_for('login'))
+        flash("Please provide both username and password.", "danger")
+        return redirect(url_for("login"))
     success, message = auth.login_user(username, password, remember)
     if success:
-        flash(message, 'success')
-        next_page = request.args.get('next')
-        return redirect(next_page) if next_page else redirect(url_for('network_traffic'))
-    flash(message, 'danger')
-    return redirect(url_for('login'))
+        flash(message, "success")
+        return redirect(request.args.get("next") or url_for("network_traffic"))
+    flash(message, "danger")
+    return redirect(url_for("login"))
 
-@flask_app.route('/register')
+@flask_app.route("/register")
 def register():
-    return redirect(url_for('index')) if auth.is_authenticated() else render_template('register.html')
+    return redirect(url_for("index")) if auth.is_authenticated() else render_template("register.html")
 
-@flask_app.route('/register', methods=['POST'])
+@flask_app.route("/register", methods=["POST"])
 def register_post():
     success, message = auth.register_user(
-        request.form.get('username'), request.form.get('email'),
-        request.form.get('password'), request.form.get('confirm_password'),
-        request.form.get('full_name')
+        request.form.get("username"), request.form.get("email"),
+        request.form.get("password"), request.form.get("confirm_password"),
+        request.form.get("full_name"),
     )
     if success:
-        flash(message, 'success')
-        return redirect(url_for('login'))
+        flash(message, "success")
+        return redirect(url_for("login"))
     for err in (message if isinstance(message, list) else [message]):
-        flash(err, 'danger')
-    return redirect(url_for('register'))
+        flash(err, "danger")
+    return redirect(url_for("register"))
 
-@flask_app.route('/logout')
+@flask_app.route("/logout")
 def logout():
     auth.logout_user()
-    flash('You have been logged out successfully.', 'info')
-    return redirect(url_for('login'))
+    flash("You have been logged out successfully.", "info")
+    return redirect(url_for("login"))
 
-@flask_app.route('/change-password', methods=['POST'])
+@flask_app.route("/change-password", methods=["POST"])
 def change_password():
     if not auth.is_authenticated():
-        return jsonify({'success': False, 'message': 'Not authenticated'}), 401
+        return jsonify({"success": False, "message": "Not authenticated"}), 401
     success, message = auth.change_password(
-        request.form.get('current_password'),
-        request.form.get('new_password'),
-        request.form.get('confirm_password')
+        request.form.get("current_password"),
+        request.form.get("new_password"),
+        request.form.get("confirm_password"),
     )
-    return jsonify({'success': success, 'message': message}), (200 if success else 400)
+    return jsonify({"success": success, "message": message}), (200 if success else 400)
 
 
-# ── API ENDPOINTS ─────────────────────────────────────────
-@flask_app.route('/api/real-time-traffic')
+# --- API helpers -------------------------------------------------------------
+def _calculate_stats(packets: list) -> dict:
+    if not packets:
+        now = time.time()
+        bl  = (100 if baseline_ready else
+               min(99, int(((now - baseline_start) / BASELINE_LEARNING_SECONDS) * 100))
+               if baseline_start else 0)
+        return {"total": 0, "safe": 0, "suspicious": 0, "attack": 0,
+                "tcp": 0, "udp": 0, "icmp": 0, "other": 0,
+                "avg_packet_size": 0, "packets_per_sec": 0,
+                "baseline_ready": baseline_ready, "baseline_progress": bl}
+    tcp  = sum(1 for p in packets if p.get("protocol") == "TCP")
+    udp  = sum(1 for p in packets if p.get("protocol") == "UDP")
+    icmp = sum(1 for p in packets if p.get("protocol") == "ICMP")
+    safe = sum(1 for p in packets if p.get("status") == "normal")
+    susp = sum(1 for p in packets if p.get("status") == "suspicious")
+    atk  = sum(1 for p in packets if p.get("status") == "attack")
+    avg  = sum(p.get("length", 0) for p in packets) / len(packets)
+    now  = time.time()
+    rec5 = [p for p in packets if now - p.get("time", now) <= 5]
+    bl   = (100 if baseline_ready else
+            min(99, int(((now - baseline_start) / BASELINE_LEARNING_SECONDS) * 100))
+            if baseline_start else 0)
+    return {
+        "total": len(packets), "safe": safe, "suspicious": susp, "attack": atk,
+        "tcp": tcp, "udp": udp, "icmp": icmp,
+        "other": len(packets) - tcp - udp - icmp,
+        "avg_packet_size":  round(avg, 2),
+        "packets_per_sec":  round(len(rec5) / 5, 2) if rec5 else 0,
+        "baseline_ready":   baseline_ready,
+        "baseline_progress": bl,
+    }
+
+
+# --- API routes --------------------------------------------------------------
+@flask_app.route("/api/real-time-traffic")
 def api_real_time_traffic():
     try:
         with packet_lock:
-            packet_data = [{
-                "timestamp": p.get("timestamp", "--:--:--"),
-                "src":       p.get("src", "N/A"),
-                "dst":       p.get("dst", "N/A"),
-                "protocol":  p.get("protocol", "N/A"),
-                "dport":     p.get("dport", "N/A"),
-                "length":    p.get("length", 0),
-                "status":    p.get("status", "normal"),
-                "flags":     p.get("flags", "")
-            } for p in packet_list[-100:]]
-        return jsonify({
-            "packets": packet_data[::-1],
-            "stats":   calculate_real_time_stats(),
-            "last_updated":   datetime.now().strftime("%H:%M:%S"),
-            "total_captured": len(packet_list),
-            "status": "success"
-        })
+            snap  = packet_list[-100:]
+            stats = _calculate_stats(packet_list[-1000:])
+        data = [{
+            "timestamp": p.get("timestamp","--:--:--"),
+            "src": p.get("src","N/A"), "dst": p.get("dst","N/A"),
+            "protocol": p.get("protocol","N/A"), "dport": p.get("dport","N/A"),
+            "length": p.get("length",0), "status": p.get("status","normal"),
+            "flags": p.get("flags",""),
+        } for p in snap]
+        return jsonify({"packets": data[::-1], "stats": stats,
+                        "last_updated": datetime.now().strftime("%H:%M:%S"),
+                        "total_captured": len(packet_list), "status": "success"})
     except Exception as e:
         return jsonify({"packets": [], "stats": {}, "status": "error", "error": str(e)})
 
 
-def calculate_real_time_stats():
-    try:
-        with packet_lock:
-            packets = packet_list[-1000:] if len(packet_list) > 1000 else packet_list.copy()
-        if not packets:
-            return {"total": 0, "safe": 0, "suspicious": 0, "attack": 0,
-                    "tcp": 0, "udp": 0, "icmp": 0, "other": 0,
-                    "avg_packet_size": 0, "packets_per_sec": 0,
-                    "baseline_ready": baseline_ready, "baseline_progress": 0}
-
-        tcp_count   = sum(1 for p in packets if p.get("protocol") == "TCP")
-        udp_count   = sum(1 for p in packets if p.get("protocol") == "UDP")
-        icmp_count  = sum(1 for p in packets if p.get("protocol") == "ICMP")
-        safe_count       = sum(1 for p in packets if p.get("status") == "normal")
-        suspicious_count = sum(1 for p in packets if p.get("status") == "suspicious")
-        attack_count     = sum(1 for p in packets if p.get("status") == "attack")
-        avg_size = sum(p.get("length", 0) for p in packets) / len(packets)
-        now = time.time()
-        recent = [p for p in packets if now - p.get("time", now) <= 5]
-
-        if baseline_ready:
-            bl_progress = 100
-        elif baseline_start:
-            bl_progress = min(99, int(((now - baseline_start) / BASELINE_LEARNING_SECONDS) * 100))
-        else:
-            bl_progress = 0
-
-        return {
-            "total": len(packets), "safe": safe_count,
-            "suspicious": suspicious_count, "attack": attack_count,
-            "tcp": tcp_count, "udp": udp_count, "icmp": icmp_count,
-            "other": len(packets) - tcp_count - udp_count - icmp_count,
-            "avg_packet_size": round(avg_size, 2),
-            "packets_per_sec": round(len(recent) / 5, 2) if recent else 0,
-            "baseline_ready": baseline_ready, "baseline_progress": bl_progress
-        }
-    except Exception as e:
-        print(f"Stats error: {e}")
-        return {"total": 0, "safe": 0, "suspicious": 0, "attack": 0,
-                "tcp": 0, "udp": 0, "icmp": 0, "other": 0,
-                "avg_packet_size": 0, "packets_per_sec": 0,
-                "baseline_ready": False, "baseline_progress": 0}
-
-
-@flask_app.route('/api/traffic-history')
+@flask_app.route("/api/traffic-history")
 def api_traffic_history():
     try:
-        five_min_ago = time.time() - 300
+        cutoff = time.time() - 300
         with packet_lock:
-            recent = [p for p in packet_list if p.get("time", 0) > five_min_ago]
-        protocol_data = {}
+            recent = [p for p in packet_list if p.get("time", 0) > cutoff]
+        proto_dist = {}
         for p in recent:
-            proto = p.get("protocol", "OTHER")
-            protocol_data[proto] = protocol_data.get(proto, 0) + 1
+            k = p.get("protocol", "OTHER")
+            proto_dist[k] = proto_dist.get(k, 0) + 1
         now = time.time()
         timeline = []
         for i in range(30):
-            s = now - (i+1)*10
-            e = now - i*10
+            s  = now - (i+1)*10
+            e  = now - i*10
             iv = [p for p in recent if s < p.get("time",0) <= e]
             timeline.append({
                 "time": datetime.fromtimestamp(e).strftime("%H:%M:%S"),
@@ -4510,191 +3300,185 @@ def api_traffic_history():
                 "udp":  sum(1 for p in iv if p.get("protocol")=="UDP"),
                 "icmp": sum(1 for p in iv if p.get("protocol")=="ICMP"),
                 "suspicious": sum(1 for p in iv if p.get("status")=="suspicious"),
-                "attack":     sum(1 for p in iv if p.get("status")=="attack")
+                "attack":     sum(1 for p in iv if p.get("status")=="attack"),
             })
         timeline.reverse()
-        return jsonify({"protocol_distribution": protocol_data, "timeline": timeline,
+        return jsonify({"protocol_distribution": proto_dist, "timeline": timeline,
                         "time_range": "5 minutes", "status": "success"})
     except Exception as e:
         return jsonify({"error": str(e), "protocol_distribution": {},
                         "timeline": [], "status": "error"})
 
 
-@flask_app.route('/api/top-conversations')
+@flask_app.route("/api/top-conversations")
 def api_top_conversations():
     try:
         with packet_lock:
-            pkts = packet_list[-500:] if len(packet_list) > 500 else packet_list.copy()
-        counts = {}; bytez = {}
+            pkts = packet_list[-500:]
+        counts, bytez = {}, {}
         for p in pkts:
             k = f"{p.get('src','?')}->{p.get('dst','?')}"
             counts[k] = counts.get(k,0) + 1
             bytez[k]  = bytez.get(k,0)  + p.get("length",0)
-        top = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:10]
         result = []
-        for conv, cnt in top:
-            src, dst = conv.split("->")
-            tb = bytez.get(conv,0)
-            result.append({"source": src, "destination": dst, "packet_count": cnt,
+        for conv, cnt in sorted(counts.items(), key=lambda x:x[1], reverse=True)[:10]:
+            s, d = conv.split("->")
+            tb   = bytez.get(conv, 0)
+            result.append({"source": s, "destination": d, "packet_count": cnt,
                            "total_bytes": tb, "avg_packet_size": tb//cnt if cnt else 0})
         return jsonify({"conversations": result, "status": "success"})
     except Exception as e:
         return jsonify({"conversations": [], "status": "error", "error": str(e)})
 
 
-@flask_app.route('/api/packet-size-distribution')
+@flask_app.route("/api/packet-size-distribution")
 def api_packet_size_distribution():
     try:
         with packet_lock:
-            pkts = packet_list[-500:] if len(packet_list) > 500 else packet_list.copy()
-        bins = {"0-100": 0, "101-500": 0, "501-1000": 0, "1001-1500": 0, "1501+": 0}
+            pkts = packet_list[-500:]
+        bins  = {"0-100":0,"101-500":0,"501-1000":0,"1001-1500":0,"1501+":0}
         sizes = []
         for p in pkts:
-            s = p.get("length", 0); sizes.append(s)
-            if s<=100: bins["0-100"]+=1
-            elif s<=500: bins["101-500"]+=1
+            s = p.get("length",0); sizes.append(s)
+            if s<=100:    bins["0-100"]+=1
+            elif s<=500:  bins["101-500"]+=1
             elif s<=1000: bins["501-1000"]+=1
             elif s<=1500: bins["1001-1500"]+=1
-            else: bins["1501+"]+=1
+            else:         bins["1501+"]+=1
         return jsonify({"distribution": bins,
                         "min_size": min(sizes) if sizes else 0,
                         "max_size": max(sizes) if sizes else 0,
-                        "avg_size": sum(sizes)/len(sizes) if sizes else 0,
-                        "most_common": max(bins.items(), key=lambda x:x[1])[0],
+                        "avg_size": round(sum(sizes)/len(sizes),2) if sizes else 0,
+                        "most_common": max(bins, key=bins.get),
                         "status": "success"})
     except Exception as e:
-        return jsonify({"distribution": {}, "min_size": 0, "max_size": 0,
-                        "avg_size": 0, "most_common": "0-100", "status": "error", "error": str(e)})
+        return jsonify({"distribution":{}, "min_size":0, "max_size":0,
+                        "avg_size":0, "most_common":"0-100", "status":"error", "error":str(e)})
 
 
-@flask_app.route('/api/network-status')
+@flask_app.route("/api/network-status")
 def api_network_status():
     try:
         now = time.time()
-        recent_attacks      = [a for a in attack_history if (datetime.now()-a["time"]).total_seconds()<300]
-        very_recent_attacks = [a for a in attack_history if (datetime.now()-a["time"]).total_seconds()<10]
-        status = "under_attack" if very_recent_attacks else "warning" if recent_attacks else "normal"
+        recent_atk  = [a for a in attack_history if (datetime.now()-a["time"]).total_seconds()<300]
+        very_recent = [a for a in attack_history if (datetime.now()-a["time"]).total_seconds()<10]
+        status      = "under_attack" if very_recent else ("warning" if recent_atk else "normal")
         recent_pkts = [p for p in packet_list if now - p.get("time",now) <= 10]
-        bl_progress = 100 if baseline_ready else (
-            min(99, int(((now-baseline_start)/BASELINE_LEARNING_SECONDS)*100)) if baseline_start else 0)
-
-        # Count by attack type for summary
-        attack_type_counts = defaultdict(int)
-        for a in attack_history:
-            attack_type_counts[a["type"]] += 1
-
+        bl = (100 if baseline_ready else
+              min(99,int(((now-baseline_start)/BASELINE_LEARNING_SECONDS)*100))
+              if baseline_start else 0)
+        atk_counts = defaultdict(int)
+        for a in attack_history: atk_counts[a["type"]] += 1
         return jsonify({
-            "status":              status,
-            "packets_per_second":  round(len(recent_pkts)/10, 2) if recent_pkts else 0,
+            "status": status,
+            "packets_per_second":  round(len(recent_pkts)/10,2) if recent_pkts else 0,
             "total_packets":       len(packet_list),
-            "active_attacks":      len(recent_attacks),
+            "active_attacks":      len(recent_atk),
             "interface":           INTERFACE,
             "uptime":              get_uptime(),
             "ml_enabled":          ML_ENABLED,
-            "memory_usage":        round(len(packet_list)*0.01, 2),
+            "memory_usage":        round(len(packet_list)*0.01,2),
             "capture_status":      "active",
-            "attack_status":       "normal" if status=="normal" else "warning" if status=="warning" else "critical",
+            "attack_status":       ("critical" if status=="under_attack"
+                                    else "warning" if status=="warning" else "normal"),
             "system_time":         datetime.now().strftime("%H:%M:%S"),
             "zero_day_enabled":    True,
             "baseline_ready":      baseline_ready,
-            "baseline_progress":   bl_progress,
+            "baseline_progress":   bl,
             "anomaly_z_threshold": ANOMALY_Z_THRESHOLD,
-            "attack_type_summary": dict(attack_type_counts),
+            "attack_type_summary": dict(atk_counts),
             "brute_force_ports":   list(BRUTE_FORCE_PORTS.keys()),
+            "whitelist_private":   WHITELIST_PRIVATE_RANGES,
         })
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)})
 
 
-@flask_app.route('/api/attacks')
+@flask_app.route("/api/attacks")
 def api_attacks():
     try:
         import re
-        attacks_list = sorted(list(attack_history), key=lambda x: x["time"], reverse=True)
-        attack_data = []
-        for attack in attacks_list[:50]:
-            msg = attack["message"]
-            src_m = re.search(r'SRC=([\d\.]+)', msg)
-            dst_m = re.search(r'DST=([\d\.]+)', msg)
-            atype = attack["type"]
-            severity = (
-                "critical" if atype in ("DDoS","ZERO_DAY","CREDENTIAL_STUFFING") else
-                "high"     if atype in ("DoS","SYN_FLOOD","RST_FLOOD","FIN_FLOOD","HTTP_FLOOD","BRUTE_FORCE") else
-                "medium"
-            )
-            attack_data.append({
-                "type":      atype,
-                "message":   msg,
-                "timestamp": attack["timestamp"],
-                "source":    src_m.group(1) if src_m else "Unknown",
-                "target":    dst_m.group(1) if dst_m else "Unknown",
-                "severity":  severity,
-                "time_ago":  get_time_ago(attack["time"])
+        result = []
+        for a in sorted(attack_history, key=lambda x:x["time"], reverse=True)[:50]:
+            msg   = a["message"]
+            src_m = re.search(r"SRC=([\d\.]+)", msg)
+            dst_m = re.search(r"DST=([\d\.]+)", msg)
+            atype = a["type"]
+            sev   = ("critical" if atype in ("DDoS","ZERO_DAY","CREDENTIAL_STUFFING")
+                     else "high" if atype in ("DoS","SYN_FLOOD","RST_FLOOD","FIN_FLOOD",
+                                               "ACK_FLOOD","HTTP_FLOOD","BRUTE_FORCE")
+                     else "medium")
+            result.append({
+                "type": atype, "message": msg, "timestamp": a["timestamp"],
+                "source": src_m.group(1) if src_m else "Unknown",
+                "target": dst_m.group(1) if dst_m else "Unknown",
+                "severity": sev, "time_ago": get_time_ago(a["time"]),
             })
         return jsonify({
-            "attacks":        attack_data,
-            "total":          len(attack_history),
-            "today":          len([a for a in attack_history if a["time"].date()==datetime.now().date()]),
-            "zero_day_count": len([a for a in attack_history if "ZERO_DAY" in a["type"]]),
-            "brute_force_count": len([a for a in attack_history if "BRUTE_FORCE" in a["type"]]),
-            "status": "success"
+            "attacks":           result,
+            "total":             len(attack_history),
+            "today":             len([a for a in attack_history
+                                       if a["time"].date()==datetime.now().date()]),
+            "zero_day_count":    sum(1 for a in attack_history if "ZERO_DAY"    in a["type"]),
+            "brute_force_count": sum(1 for a in attack_history if "BRUTE_FORCE" in a["type"]),
+            "status": "success",
         })
     except Exception as e:
-        return jsonify({"attacks": [], "total": 0, "today": 0, "status": "error", "error": str(e)})
+        return jsonify({"attacks":[],"total":0,"today":0,"status":"error","error":str(e)})
 
 
-@flask_app.route('/api/notifications')
+@flask_app.route("/api/notifications")
 def api_notifications():
     try:
-        notifs = [{
-            "id": 1, "type": "system", "title": "System Started",
-            "message": f"Hybrid IDS started on interface {INTERFACE}",
-            "timestamp": system_start_time.strftime("%H:%M:%S"),
-            "read": True, "priority": "info"
-        }]
+        notifs = [{"id":1,"type":"system","title":"System Started",
+                   "message":f"Hybrid IDS running on {INTERFACE}",
+                   "timestamp":system_start_time.strftime("%H:%M:%S"),
+                   "read":True,"priority":"info"}]
         if ML_ENABLED:
-            notifs.append({"id": 2, "type": "system", "title": "ML Detection Enabled",
-                           "message": "Machine learning attack detection is active",
-                           "timestamp": datetime.now().strftime("%H:%M:%S"),
-                           "read": True, "priority": "info"})
+            notifs.append({"id":2,"type":"system","title":"ML Detection Enabled",
+                           "message":"Machine learning detection is active",
+                           "timestamp":datetime.now().strftime("%H:%M:%S"),
+                           "read":True,"priority":"info"})
         if baseline_ready:
-            notifs.append({"id": 3, "type": "system", "title": "Zero-Day Detection Active",
-                           "message": f"Baseline established. Z={ANOMALY_Z_THRESHOLD}",
-                           "timestamp": datetime.now().strftime("%H:%M:%S"),
-                           "read": True, "priority": "info"})
+            notifs.append({"id":3,"type":"system","title":"Zero-Day Detection Active",
+                           "message":f"Baseline established — Z={ANOMALY_Z_THRESHOLD}",
+                           "timestamp":datetime.now().strftime("%H:%M:%S"),
+                           "read":True,"priority":"info"})
         elif baseline_start:
-            pct = min(99, int(((time.time()-baseline_start)/BASELINE_LEARNING_SECONDS)*100))
-            notifs.append({"id": 3, "type": "system", "title": "Zero-Day Baseline Learning…",
-                           "message": f"Building baseline ({pct}% complete)",
-                           "timestamp": datetime.now().strftime("%H:%M:%S"),
-                           "read": True, "priority": "info"})
-        notifs.append({"id": 4, "type": "system", "title": "Brute Force Detection Active",
-                       "message": f"Monitoring {len(BRUTE_FORCE_PORTS)} service ports. Threshold={BRUTE_FORCE_THRESHOLD} attempts/{BRUTE_FORCE_WINDOW}s",
-                       "timestamp": datetime.now().strftime("%H:%M:%S"),
-                       "read": True, "priority": "info"})
+            pct = min(99,int(((time.time()-baseline_start)/BASELINE_LEARNING_SECONDS)*100))
+            notifs.append({"id":3,"type":"system","title":"Zero-Day Baseline Learning",
+                           "message":f"Building baseline ({pct}% complete)",
+                           "timestamp":datetime.now().strftime("%H:%M:%S"),
+                           "read":True,"priority":"info"})
+        notifs.append({"id":4,"type":"system","title":"Brute Force Detection Active",
+                       "message":f"Monitoring {len(BRUTE_FORCE_PORTS)} auth ports — "
+                                  f"threshold {BRUTE_FORCE_THRESHOLD}/{BRUTE_FORCE_WINDOW}s",
+                       "timestamp":datetime.now().strftime("%H:%M:%S"),
+                       "read":True,"priority":"info"})
         for i, a in enumerate(list(attack_history)[-10:]):
-            priority = ("critical" if a["type"] in ("DDoS","ZERO_DAY","CREDENTIAL_STUFFING") else
-                        "high"     if a["type"] in ("DoS","BRUTE_FORCE","HTTP_FLOOD","RST_FLOOD","FIN_FLOOD") else
-                        "medium")
-            notifs.append({"id": 1000+i, "type": "attack",
-                           "title": f"Attack: {a['type']}", "message": a['message'],
-                           "timestamp": a['timestamp'], "read": False, "priority": priority})
-        return jsonify({"notifications": notifs[::-1],
-                        "unread": len([n for n in notifs if not n.get("read",False)]),
-                        "status": "success"})
+            pri = ("critical" if a["type"] in ("DDoS","ZERO_DAY","CREDENTIAL_STUFFING")
+                   else "high" if a["type"] in ("DoS","BRUTE_FORCE","HTTP_FLOOD",
+                                                 "RST_FLOOD","FIN_FLOOD","ACK_FLOOD")
+                   else "medium")
+            notifs.append({"id":1000+i,"type":"attack",
+                           "title":f"Attack: {a['type']}","message":a["message"],
+                           "timestamp":a["timestamp"],"read":False,"priority":pri})
+        return jsonify({"notifications":notifs[::-1],
+                        "unread":sum(1 for n in notifs if not n.get("read",False)),
+                        "status":"success"})
     except Exception as e:
-        return jsonify({"notifications": [], "unread": 0, "status": "error", "error": str(e)})
+        return jsonify({"notifications":[],"unread":0,"status":"error","error":str(e)})
 
 
-@flask_app.route('/api/analysis')
+@flask_app.route("/api/analysis")
 def api_analysis():
     try:
         with packet_lock:
             packets = packet_list.copy()
         if not packets:
-            return jsonify({"protocols":{}, "top_sources":[], "top_destinations":[],
-                            "packet_rate":0, "avg_packet_size":0, "total_bytes":0,
-                            "hourly_pattern":[], "status":"success"})
+            return jsonify({"protocols":{},"top_sources":[],"top_destinations":[],
+                            "packet_rate":0,"avg_packet_size":0,"total_bytes":0,
+                            "hourly_pattern":[],"status":"success"})
         protocols = defaultdict(int)
         sources   = defaultdict(int)
         dests     = defaultdict(int)
@@ -4704,100 +3488,94 @@ def api_analysis():
             dests[p.get("dst")]   += 1
         elapsed = time.time() - packets[0].get("time", time.time())
         return jsonify({
-            "protocols":        dict(protocols),
-            "top_sources":      [{"ip":ip,"count":c} for ip,c in sorted(sources.items(),key=lambda x:x[1],reverse=True)[:10]],
-            "top_destinations": [{"ip":ip,"count":c} for ip,c in sorted(dests.items(),  key=lambda x:x[1],reverse=True)[:10]],
-            "packet_rate":      round(len(packets)/max(1,elapsed)*60, 2),
-            "avg_packet_size":  round(np.mean([p.get("length",0) for p in packets]), 2),
-            "total_bytes":      sum(p.get("length",0) for p in packets),
-            "hourly_pattern":   [{"hour":f"{h:02d}:00","packets":np.random.randint(50,500)} for h in range(24)],
-            "status": "success"
+            "protocols": dict(protocols),
+            "top_sources":      [{"ip":ip,"count":c} for ip,c in
+                                  sorted(sources.items(),key=lambda x:x[1],reverse=True)[:10]],
+            "top_destinations": [{"ip":ip,"count":c} for ip,c in
+                                  sorted(dests.items(),key=lambda x:x[1],reverse=True)[:10]],
+            "packet_rate":     round(len(packets)/max(1,elapsed)*60,2),
+            "avg_packet_size": round(float(np.mean([p.get("length",0) for p in packets])),2),
+            "total_bytes":     sum(p.get("length",0) for p in packets),
+            "hourly_pattern":  [{"hour":f"{h:02d}:00",
+                                  "packets":int(np.random.randint(50,500))} for h in range(24)],
+            "status": "success",
         })
     except Exception as e:
-        return jsonify({"protocols":{}, "top_sources":[], "top_destinations":[],
-                        "packet_rate":0, "avg_packet_size":0, "total_bytes":0,
-                        "hourly_pattern":[], "status":"error", "error":str(e)})
+        return jsonify({"protocols":{},"top_sources":[],"top_destinations":[],
+                        "packet_rate":0,"avg_packet_size":0,"total_bytes":0,
+                        "hourly_pattern":[],"status":"error","error":str(e)})
 
 
-@flask_app.route('/api/clear-traffic', methods=['POST'])
+@flask_app.route("/api/clear-traffic", methods=["POST"])
 def api_clear_traffic():
     try:
         global packet_list
         with packet_lock: packet_list.clear()
-        return jsonify({"success": True, "message": "Traffic data cleared"})
+        return jsonify({"success":True,"message":"Traffic data cleared"})
     except Exception as e:
-        return jsonify({"success": False, "message": str(e)})
+        return jsonify({"success":False,"message":str(e)})
 
 
-@flask_app.route('/api/resume-capture', methods=['POST'])
+@flask_app.route("/api/resume-capture", methods=["POST"])
 def api_resume_capture():
-    return jsonify({"success": True, "message": "Capture is always active"})
+    return jsonify({"success":True,"message":"Capture is always active"})
 
 
-@flask_app.route('/api/zero-day-stats')
+@flask_app.route("/api/zero-day-stats")
 def api_zero_day_stats():
     try:
         stats = {}
         if baseline_ready:
             for fname in FEATURE_NAMES:
-                stats[fname] = {"mean": round(baseline_means.get(fname,0),3),
-                                "std":  round(baseline_stds.get(fname,0),3)}
-        return jsonify({
-            "enabled": True, "baseline_ready": baseline_ready,
-            "feature_stats": stats, "z_threshold": ANOMALY_Z_THRESHOLD,
-            "feature_count_req": ANOMALY_FEATURE_COUNT,
-            "cooldown_sec": ZERO_DAY_COOLDOWN,
-            "learning_window": BASELINE_LEARNING_SECONDS,
-            "total_zero_day": len([a for a in attack_history if "ZERO_DAY" in a["type"]]),
-            "status": "success"
-        })
+                stats[fname] = {"mean":round(baseline_means.get(fname,0),3),
+                                "std": round(baseline_stds.get(fname,0),3)}
+        return jsonify({"enabled":True,"baseline_ready":baseline_ready,
+                        "feature_stats":stats,"z_threshold":ANOMALY_Z_THRESHOLD,
+                        "feature_count_req":ANOMALY_FEATURE_COUNT,
+                        "cooldown_sec":ZERO_DAY_COOLDOWN,
+                        "learning_window":BASELINE_LEARNING_SECONDS,
+                        "total_zero_day":sum(1 for a in attack_history if "ZERO_DAY" in a["type"]),
+                        "status":"success"})
     except Exception as e:
-        return jsonify({"enabled": True, "baseline_ready": False, "status": "error", "error": str(e)})
+        return jsonify({"enabled":True,"baseline_ready":False,"status":"error","error":str(e)})
 
 
-@flask_app.route('/api/brute-force-stats')
+@flask_app.route("/api/brute-force-stats")
 def api_brute_force_stats():
-    """Live brute force attempt counts per IP:port."""
     try:
-        now = time.time()
+        now    = time.time()
         active = []
         with brute_force_lock:
-            for key, attempts in brute_force_attempts.items():
-                # Count attempts in last window
-                recent = sum(1 for t in attempts if now - t <= BRUTE_FORCE_WINDOW)
+            for key, q in brute_force_attempts.items():
+                recent = sum(1 for t in q if now - t <= BRUTE_FORCE_WINDOW)
                 if recent > 0:
-                    src, dport = key.rsplit(":", 1)
-                    dport = int(dport)
-                    active.append({
-                        "src":     src,
-                        "port":    dport,
-                        "service": BRUTE_FORCE_PORTS.get(dport, f"PORT-{dport}"),
-                        "attempts_in_window": recent,
-                        "threshold": BRUTE_FORCE_THRESHOLD,
-                        "pct": round(recent / BRUTE_FORCE_THRESHOLD * 100, 1)
-                    })
-        active.sort(key=lambda x: x["attempts_in_window"], reverse=True)
-        return jsonify({
-            "active_attempts": active[:20],
-            "window_seconds":  BRUTE_FORCE_WINDOW,
-            "threshold":       BRUTE_FORCE_THRESHOLD,
-            "monitored_ports": BRUTE_FORCE_PORTS,
-            "status": "success"
-        })
+                    src, dp = key.rsplit(":",1)
+                    dp = int(dp)
+                    active.append({"src":src,"port":dp,
+                                   "service":BRUTE_FORCE_PORTS.get(dp,f"PORT-{dp}"),
+                                   "attempts_in_window":recent,
+                                   "threshold":BRUTE_FORCE_THRESHOLD,
+                                   "pct":round(recent/BRUTE_FORCE_THRESHOLD*100,1)})
+        active.sort(key=lambda x:x["attempts_in_window"],reverse=True)
+        return jsonify({"active_attempts":active[:20],"window_seconds":BRUTE_FORCE_WINDOW,
+                        "threshold":BRUTE_FORCE_THRESHOLD,
+                        "monitored_ports":BRUTE_FORCE_PORTS,"status":"success"})
     except Exception as e:
-        return jsonify({"active_attempts": [], "status": "error", "error": str(e)})
+        return jsonify({"active_attempts":[],"status":"error","error":str(e)})
 
 
-# ── DASH LEGACY DASHBOARD ─────────────────────────────────
-app = dash.Dash(__name__, server=flask_app, url_base_pathname='/dash/')
-app.title = "Hybrid IDS - Real-time"
+# =============================================================================
+# DASH  (legacy dashboard)
+# =============================================================================
+app = dash.Dash(__name__, server=flask_app, url_base_pathname="/dash/")
+app.title = "Hybrid IDS"
 app.layout = html.Div([
-    html.H1("🛡 Hybrid IDS Dashboard", style={"textAlign":"center"}),
+    html.H1("Hybrid IDS Dashboard", style={"textAlign":"center"}),
     html.Div(id="alert-box", style={"textAlign":"center","padding":"15px"}),
-    html.Button("▶ Clear Alerts", id="resume-btn"),
-    html.Div(id="stats"),
+    html.Button("Clear Alert Display", id="clear-btn"),
+    html.Div(id="stats-bar"),
     dash_table.DataTable(
-        id="table",
+        id="pkt-table",
         columns=[
             {"name":"Time",        "id":"timestamp"},
             {"name":"Source",      "id":"src"},
@@ -4811,74 +3589,88 @@ app.layout = html.Div([
         style_data_conditional=[
             {"if":{"filter_query":'{status} = "attack"'},     "backgroundColor":"#ffcccc"},
             {"if":{"filter_query":'{status} = "suspicious"'}, "backgroundColor":"#fff3cd"},
-        ]
+        ],
     ),
-    dcc.Interval(id="tick", interval=2000)
+    dcc.Interval(id="tick", interval=2000),
 ])
 
+
 @app.callback(
-    [Output("table","data"), Output("alert-box","children"), Output("stats","children")],
-    Input("tick","n_intervals")
+    [Output("pkt-table","data"),
+     Output("alert-box","children"),
+     Output("stats-bar","children")],
+    Input("tick","n_intervals"),
 )
-def update_ui(n):
+def update_dash(n):
     with packet_lock:
-        data = packet_list[-10:]
-    recent = [a for a in attack_history if (datetime.now()-a["time"]).total_seconds()<30]
-    alert = html.Div(
-        [html.H2("🚨 ATTACK DETECTED"), html.P(f"{recent[-1]['type']} | {recent[-1]['message']}")],
-        style={"background":"#ffcccc","padding":"10px"}
-    ) if recent else html.Div("✅ NORMAL", style={"color":"green","fontWeight":"bold"})
-
-    suspicious_count = sum(1 for p in packet_list[-100:] if p.get("status")=="suspicious")
-    zd = "✅ Active" if baseline_ready else f"⏳ Learning ({min(99,int(((time.time()-(baseline_start or time.time()))/BASELINE_LEARNING_SECONDS)*100))}%)"
-    bf_alerts = len([a for a in attack_history if "BRUTE_FORCE" in a["type"]])
-
-    stats = html.Div([
+        rows = packet_list[-10:]
+    recent_attacks = [a for a in attack_history
+                      if (datetime.now()-a["time"]).total_seconds() < 30]
+    if recent_attacks:
+        latest   = recent_attacks[-1]
+        alert_el = html.Div(
+            [html.H3("ATTACK DETECTED"),
+             html.P(f"{latest['type']} — {latest['message']}")],
+            style={"background":"#ffcccc","padding":"10px","borderRadius":"6px"})
+    else:
+        alert_el = html.Div("NORMAL",
+                            style={"color":"green","fontWeight":"bold","fontSize":18})
+    susp  = sum(1 for p in packet_list[-100:] if p.get("status")=="suspicious")
+    now_t = time.time()
+    zd_pct = min(99,int(((now_t-(baseline_start or now_t))/BASELINE_LEARNING_SECONDS)*100))
+    zd     = "Active" if baseline_ready else f"Learning ({zd_pct}%)"
+    bf     = sum(1 for a in attack_history if "BRUTE_FORCE" in a["type"])
+    stats_el = html.Div([
         html.Span(f"Packets: {len(packet_list)}  |  "),
-        html.Span(f"Suspicious: {suspicious_count}  |  "),
-        html.Span(f"Total alerts: {len(attack_history)}  |  "),
-        html.Span(f"Brute force: {bf_alerts}  |  "),
-        html.Span(f"Zero-Day: {zd}")
+        html.Span(f"Suspicious: {susp}  |  "),
+        html.Span(f"Alerts: {len(attack_history)}  |  "),
+        html.Span(f"Brute-force: {bf}  |  "),
+        html.Span(f"Zero-Day: {zd}"),
     ])
-    return data, alert, stats
-
-@app.callback(Output("alert-box","style"), Input("resume-btn","n_clicks"))
-def clear_alert(n): return {}
+    return rows, alert_el, stats_el
 
 
-# ── MAIN ──────────────────────────────────────────────────
+@app.callback(Output("alert-box","style"), Input("clear-btn","n_clicks"))
+def clear_alert_style(_): return {}
+
+
+# =============================================================================
+# ENTRY POINT
+# =============================================================================
 if __name__ == "__main__":
-    print("\n" + "="*60)
-    print("🛡  HYBRID INTRUSION DETECTION SYSTEM")
-    print("="*60)
-    print(f"📡 Interface:        {INTERFACE}")
-    print(f"🔧 ML Detection:     {'ENABLED' if ML_ENABLED else 'DISABLED'}")
-    print(f"📊 Max Packets:      {MAX_PACKETS}")
-    print(f"🚫 Whitelisted:      {', '.join(WHITELISTED_IPS)}")
-    print(f"🧠 Zero-Day:         ENABLED (baseline={BASELINE_LEARNING_SECONDS}s, z={ANOMALY_Z_THRESHOLD})")
-    print(f"🔐 Brute Force:      ENABLED ({BRUTE_FORCE_THRESHOLD} attempts/{BRUTE_FORCE_WINDOW}s)")
-    print(f"🌊 RST/FIN Flood:    ENABLED (threshold={RST_FLOOD_THRESHOLD} pps)")
-    print(f"🌐 HTTP Flood:       ENABLED (threshold={HTTP_FLOOD_THRESHOLD} pps)")
-    print(f"⏱  Attack Cooldown:  {ATTACK_COOLDOWN_SEC}s per (type, source) pair")
-    print("="*60)
-    print("🌐 Dashboard URLs:")
-    print("   Main UI          → http://127.0.0.1:8090/network-traffic")
-    print("   Analysis         → http://127.0.0.1:8090/analysis")
-    print("   Attacks          → http://127.0.0.1:8090/attacks")
-    print("   Notifications    → http://127.0.0.1:8090/notifications")
-    print("   Settings         → http://127.0.0.1:8090/settings")
-    print("   Legacy Dash      → http://127.0.0.1:8090/dash/")
-    print("   Zero-Day Stats   → http://127.0.0.1:8090/api/zero-day-stats")
-    print("   Brute Force Live → http://127.0.0.1:8090/api/brute-force-stats")
-    print("="*60)
-    print("⚠️  Run with: sudo python main.py")
-    print("="*60 + "\n")
-
     import os
-    if not os.path.exists('templates'):
-        os.makedirs('templates')
+    print("\n" + "="*65)
+    print("   HYBRID INTRUSION DETECTION SYSTEM")
+    print("="*65)
+    print(f"  Interface          : {INTERFACE}")
+    print(f"  ML Detection       : {'ENABLED' if ML_ENABLED else 'DISABLED'}")
+    print(f"  Whitelisted IPs    : {', '.join(WHITELISTED_IPS)}")
+    print(f"  Private Ranges     : {'AUTO-WHITELISTED' if WHITELIST_PRIVATE_RANGES else 'NOT whitelisted (correct for testing)'}")
+    print(f"  Zero-Day           : baseline={BASELINE_LEARNING_SECONDS}s  z={ANOMALY_Z_THRESHOLD}  features={ANOMALY_FEATURE_COUNT}")
+    print(f"  Brute Force        : {BRUTE_FORCE_THRESHOLD} attempts/{BRUTE_FORCE_WINDOW}s")
+    print(f"  RST/FIN Flood      : threshold={RST_FLOOD_THRESHOLD}/{FIN_FLOOD_THRESHOLD} pps")
+    print(f"  ACK Flood          : threshold={ACK_FLOOD_THRESHOLD} pps  [NEW]")
+    print(f"  HTTP Flood         : threshold={HTTP_FLOOD_THRESHOLD} pps")
+    print(f"  XMAS/NULL Scan     : {XMAS_SCAN_THRESHOLD}/{NULL_SCAN_THRESHOLD} ports/{SCAN_WINDOW}s  [NEW]")
+    print(f"  Cred Stuffing      : {CRED_STUFF_SRC_THRESHOLD} unique IPs/{CRED_STUFF_WINDOW}s")
+    print(f"  Alert Cooldown     : {ATTACK_COOLDOWN_SEC}s per (type, source)")
+    print(f"  Suspicious @ >     : {int(DOS_PPS_THRESHOLD*SUSPICIOUS_PPS_FACTOR)} pps")
+    print("="*65)
+    print("  URLs:")
+    print("    Network Traffic  ->  http://127.0.0.1:8090/network-traffic")
+    print("    Attacks          ->  http://127.0.0.1:8090/attacks")
+    print("    Analysis         ->  http://127.0.0.1:8090/analysis")
+    print("    Notifications    ->  http://127.0.0.1:8090/notifications")
+    print("    Legacy Dash      ->  http://127.0.0.1:8090/dash/")
+    print("    Zero-Day Stats   ->  http://127.0.0.1:8090/api/zero-day-stats")
+    print("    Brute-Force Live ->  http://127.0.0.1:8090/api/brute-force-stats")
+    print("="*65)
+    print("  Run with:  sudo python main.py")
+    print("="*65 + "\n")
 
+    if not os.path.exists("templates"):
+        os.makedirs("templates")
     try:
         flask_app.run(host="0.0.0.0", port=8090, debug=False, threaded=True)
     except Exception as e:
-        print(f"❌ Error starting server: {e}")
+        print(f"Error starting server: {e}")
