@@ -45,3 +45,19 @@
 - All pages load without Internal Server Error
 - Authentication system works properly
 - All API endpoints respond correctly
+
+
+
+
+
+
+
+
+----------------------------------testing zero day
+sudo $(which python) test_attacks.py --target 172.20.10.2 --attack 3 --iface wlan0
+
+# Run all attacks
+sudo $(which python) test_attacks.py --target 172.20.10.2 --attack all --iface wlan0
+
+# List available attacks
+python test_attacks.py --attack list

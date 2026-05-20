@@ -13,3 +13,4 @@ pandas>=1.5.0
 
 # Font Awesome for icons
 # Already loaded via CDN in the app
+07
