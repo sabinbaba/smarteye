@@ -2480,6 +2480,7 @@ ATTACK_COOLDOWN_SEC = 15
 WHITELISTED_IPS = {
     "192.168.243.99",
     "192.168.243.1",
+    "192.168.1.254",
     "127.0.0.1",
     "172.20.10.1",   # your router/gateway only
     "0.0.0.0",

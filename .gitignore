@@ -1,0 +1,9 @@
+git# Node modules
+node_modules/
+
+# Vite
+dist/
+
+# Logs
+*.log
+

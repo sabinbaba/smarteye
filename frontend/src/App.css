@@ -1,0 +1,133 @@
+/*
+  Consolidated dashboard CSS for the React port.
+  Page-specific styles should be added here to follow the "write its css in App.css" requirement.
+*/
+
+:root {
+  --primary: #667eea;
+  --secondary: #764ba2;
+  --text: #1e293b;
+  --muted: #64748b;
+  --card: #ffffff;
+  --border: #e2e8f0;
+  --bgSoft: #f8fafc;
+}
+
+/* Common small helpers */
+.mono {
+  font-family: Monaco, 'Courier New', monospace;
+}
+
+/* Reusable card/table basics (Network Traffic / Attacks / Notifications / Analysis) */
+.nt-wrapper,
+.analysis-container,
+.attacks-container,
+.notifications-container,
+.settings-container {
+  display: flex;
+  flex-direction: column;
+  gap: 25px;
+}
+
+.card-shell {
+  background: var(--card);
+  border-radius: 15px;
+  padding: 25px;
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 15px;
+  border-bottom: 2px solid #f1f5f9;
+}
+
+.section-header h3,
+.section-header h4 {
+  color: var(--text);
+  margin: 0;
+}
+
+.table-container {
+  overflow-x: auto;
+  margin-top: 20px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+.table-basic {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.table-basic th {
+  background: var(--bgSoft);
+  padding: 15px;
+  text-align: left;
+  color: #475569;
+  font-weight: 600;
+  border-bottom: 2px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.table-basic td {
+  padding: 12px 15px;
+  border-bottom: 1px solid #f1f5f9;
+  color: #334155;
+}
+
+/* Switch */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 50px;
+  height: 24px;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #cbd5e1;
+  transition: 0.4s;
+  border-radius: 24px;
+}
+
+.slider:before {
+  position: absolute;
+  content: '';
+  height: 16px;
+  width: 16px;
+  left: 4px;
+  bottom: 4px;
+  background-color: white;
+  transition: 0.4s;
+  border-radius: 50%;
+}
+
+input:checked + .slider {
+  background-color: #10b981;
+}
+
+input:checked + .slider:before {
+  transform: translateX(26px);
+}
+
