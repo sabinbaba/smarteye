@@ -1,0 +1,276 @@
+{% extends "base.html" %} {% block pagetitle %}Attack Logs{% endblock %} {%
+block title %}All Detected Attacks (attack_logs.log){% endblock %} {% block
+subtitle %}Every detected attack/error written to attack_logs.log, including
+date/time.{% endblock %} {% block content %}
+<div class="attacks-container">
+  <div class="attacks-table-section">
+    <div class="section-header">
+      <h3><i class="fas fa-file-alt"></i> Attack Logs</h3>
+      <div class="table-info">
+        Source file: <span style="font-family: monospace">attack_logs.log</span>
+      </div>
+    </div>
+
+    <div
+      style="
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-bottom: 14px;
+      "
+    >
+      <button class="btn btn-outline" id="refresh-logs" type="button">
+        <i class="fas fa-sync-alt"></i> Refresh
+      </button>
+      <label
+        style="
+          color: #475569;
+          font-weight: 600;
+          display: flex;
+          gap: 10px;
+          align-items: center;
+        "
+      >
+        <i class="fas fa-filter"></i> Filter by type
+        <select
+          id="type-filter"
+          style="
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 2px solid #e2e8f0;
+          "
+        >
+          <option value="all" selected>All</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="table-container" style="max-height: 650px">
+      <table class="attacks-table">
+        <thead>
+          <tr>
+            <th style="width: 190px">Date & Time</th>
+            <th style="width: 160px">Attack Type</th>
+            <th>Message</th>
+          </tr>
+        </thead>
+        <tbody id="attack-logs-body">
+          <tr>
+            <td
+              colspan="3"
+              style="text-align: center; color: #94a3b8; padding: 30px"
+            >
+              <i class="fas fa-spinner fa-spin"></i> Loading...
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="table-footer">
+      <div class="bulk-actions">
+        <span id="logs-count" style="color: #475569; font-weight: 600">0</span>
+        <span style="color: #64748b">entries</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  /* Keep Attack Logs styling consistent with attacks.html */
+  .attacks-container {
+    display: flex;
+    flex-direction: column;
+    gap: 30px;
+  }
+
+  .attacks-table-section {
+    background: white;
+    border-radius: 15px;
+    padding: 25px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    border: 1px solid #e2e8f0;
+  }
+
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid #f1f5f9;
+  }
+
+  .section-header h3 {
+    color: #1e293b;
+    font-size: 1.4rem;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .section-header h3 i {
+    color: #667eea;
+  }
+
+  .table-info {
+    color: #64748b;
+    font-size: 0.9rem;
+  }
+
+  .btn-outline {
+    background: transparent;
+    border: 2px solid #e2e8f0;
+    color: #475569;
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.3s;
+  }
+
+  .btn-outline:hover {
+    background: #f8fafc;
+    border-color: #cbd5e1;
+  }
+
+  .table-container {
+    overflow-x: auto;
+    margin-top: 20px;
+    border-radius: 10px;
+    border: 1px solid #e2e8f0;
+    max-height: 600px;
+    overflow-y: auto;
+  }
+
+  .attacks-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+
+  .attacks-table th {
+    background: #f8fafc;
+    padding: 15px;
+    text-align: left;
+    color: #475569;
+    font-weight: 600;
+    border-bottom: 2px solid #e2e8f0;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  .attacks-table td {
+    padding: 12px 15px;
+    border-bottom: 1px solid #f1f5f9;
+    color: #334155;
+    vertical-align: top;
+  }
+
+  .attacks-table tr:hover {
+    background: #f8fafc;
+  }
+
+  .table-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 20px;
+    padding-top: 15px;
+    border-top: 2px solid #f1f5f9;
+  }
+
+  .bulk-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+</style>
+
+<script>
+  let logsData = [];
+
+  function extractTypeFromMessage(message) {
+    // message lines look like: "TYPE | rest"
+    // In case we receive only message part, caller sends type separately.
+    return message?.split(" | ")?.[0] || "UNKNOWN";
+  }
+
+  async function loadLogs() {
+    try {
+      const res = await fetch("/api/attack-logs");
+      const data = await res.json();
+      logsData = data.logs || [];
+
+      // Build type filter options
+      const select = document.getElementById("type-filter");
+      const current = select.value;
+      // Reset options
+      select.innerHTML = `<option value="all" ${current === "all" ? "selected" : ""}>All</option>`;
+
+      const types = Array.from(
+        new Set(logsData.map((l) => l.type || "UNKNOWN")),
+      ).sort();
+      for (const t of types) {
+        const opt = document.createElement("option");
+        opt.value = t;
+        opt.textContent = t;
+        if (t === current) opt.selected = true;
+        select.appendChild(opt);
+      }
+
+      renderTable();
+    } catch (e) {
+      console.error(e);
+      const tbody = document.getElementById("attack-logs-body");
+      tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:#dc2626; padding:30px;">Failed to load attack logs</td></tr>`;
+    }
+  }
+
+  function renderTable() {
+    const tbody = document.getElementById("attack-logs-body");
+    const type = document.getElementById("type-filter").value;
+
+    const filtered =
+      type === "all"
+        ? logsData
+        : logsData.filter((l) => (l.type || "UNKNOWN") === type);
+
+    document.getElementById("logs-count").textContent = filtered.length;
+
+    if (!filtered.length) {
+      tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:#94a3b8; padding:30px;">No logs match filter</td></tr>`;
+      return;
+    }
+
+    // Newest first already in API; just render
+    tbody.innerHTML = filtered
+      .map((l) => {
+        const ts = l.timestamp || "--";
+        const t = l.type || "UNKNOWN";
+        const msg = (l.message || "").replace(/</g, "<").replace(/>/g, ">");
+        return `
+        <tr>
+          <td style="font-family: monospace;">${ts}</td>
+          <td style="font-weight:700;">${t}</td>
+          <td style="font-family: monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 900px;">${msg}</td>
+        </tr>
+      `;
+      })
+      .join("");
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("refresh-logs").addEventListener("click", loadLogs);
+    document
+      .getElementById("type-filter")
+      .addEventListener("change", renderTable);
+    loadLogs();
+  });
+</script>
+{% endblock %}

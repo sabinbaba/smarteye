@@ -3167,6 +3167,13 @@ def notifications(): return render_template("notifications.html")
 def settings(): return render_template("settings.html")
 
 
+@flask_app.route("/attack-logs")
+@auth.login_required
+def attack_logs_page():
+    return render_template("attack_logs.html")
+
+
+
 # --- Auth routes -------------------------------------------------------------
 @flask_app.route("/login")
 def login():
@@ -3395,8 +3402,54 @@ def api_network_status():
         return jsonify({"status": "error", "error": str(e)})
 
 
+@flask_app.route("/api/attack-logs")
+def api_attack_logs():
+    """Parse attack_logs.log and return every detected attack line."""
+    try:
+        import os, re
+
+        log_path = LOG_FILE  # "attack_logs.log"
+        if not os.path.exists(log_path):
+            return jsonify({"logs": [], "status": "success"})
+
+        lines = []
+        # Newest first
+        with open(log_path, "r", encoding="utf-8", errors="ignore") as fh:
+            for raw in fh:
+                raw = raw.strip("\n")
+                if raw:
+                    lines.append(raw)
+
+        # Parse line format: [YYYY-mm-dd HH:MM:SS.micro] TYPE | key=val ...
+        # Examples from file: [2026-05-20 09:40:56.325157] HTTP_FLOOD | SRC=... PORT=...
+        parsed = []
+        line_re = re.compile(r"^\[(?P<ts>[^\]]+)\]\s+(?P<type>[^\s|]+)\s+\|\s+(?P<msg>.*)$")
+
+        for ln in lines:
+            m = line_re.match(ln)
+            if m:
+                parsed.append({
+                    "timestamp": m.group("ts"),
+                    "type": m.group("type"),
+                    "message": m.group("msg"),
+                })
+            else:
+                # Fallback: keep entire line in message
+                parsed.append({
+                    "timestamp": "--",
+                    "type": "UNKNOWN",
+                    "message": ln,
+                })
+
+        parsed = list(reversed(parsed))  # newest first
+        return jsonify({"logs": parsed, "total": len(parsed), "status": "success"})
+    except Exception as e:
+        return jsonify({"logs": [], "total": 0, "status": "error", "error": str(e)})
+
+
 @flask_app.route("/api/attacks")
 def api_attacks():
+
     try:
         import re
         result = []
