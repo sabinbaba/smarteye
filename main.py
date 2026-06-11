@@ -4113,6 +4113,17 @@ def rate_update(rate_dict: dict, key: str) -> int:
 
 def log_attack(atype: str, msg: str, src: str = "") -> None:
     global last_attack
+    # Best-effort DB persistence; never break packet capture.
+    try:
+        from postgres_attack_logs import postgres_attack_logs
+        postgres_attack_logs.insert_attack_log(
+            attack_type=atype,
+            message=msg,
+            source_ip=src or "",
+        )
+    except Exception:
+        pass
+
     now = time.time()
     cooldown_key = f"{atype}:{src}"
     with cooldown_lock:
@@ -4354,13 +4365,27 @@ def _check_anomaly(features: dict, packet_count: int = 0, src: str = ""):
         if std < ANOMALY_MIN_STD_DEV:
             continue
 
-        z = (val - mean) / std          # signed z — only positive = anomalously HIGH
+        # One-sided Z: only flag if current value is ABOVE baseline.
+        z = (val - mean) / std
         if z > ANOMALY_Z_THRESHOLD:
             anomalous.append((fname, val, mean, round(z, 2)))
             max_z = max(max_z, z)
 
-    is_anomaly = len(anomalous) >= ANOMALY_FEATURE_COUNT
-    return is_anomaly, anomalous, round(max_z, 2)
+    # FP-fix: require that traffic is not trivially small.
+    # In low-traffic situations, z-scores can spike due to tiny baselines.
+    if features.get("pkt_count", 0) < max(ANOMALY_FEATURE_COUNT * 10, MIN_PACKETS_FOR_ANOMALY):
+        return False, [], 0.0
+
+    # FP-fix: require at least one strong anomaly to avoid borderline scoring.
+    if len(anomalous) < ANOMALY_FEATURE_COUNT:
+        return False, [], round(max_z, 2)
+
+    # Require the strongest feature to be significantly above threshold.
+    # (e.g., if threshold=3, need strongest z >= 4.5)
+    if max_z < (ANOMALY_Z_THRESHOLD * 1.5):
+        return False, [], round(max_z, 2)
+
+    return True, anomalous, round(max_z, 2)
 
 
 def flush_ip_bucket(src: str, force: bool = False) -> str:
@@ -5190,6 +5215,17 @@ def api_network_status():
 @auth.login_required
 def api_attack_logs():
     try:
+        # Prefer PostgreSQL attack-log persistence when configured,
+        # but keep file-based parsing as a fallback.
+        try:
+            from postgres_attack_logs import postgres_attack_logs
+            db_logs = postgres_attack_logs.fetch_attack_logs(limit=200)
+            if db_logs:
+                # Map to the same frontend schema used by the file parser.
+                return jsonify({"logs": db_logs, "total": len(db_logs), "status": "success"})
+        except Exception:
+            pass
+
         import os, re as _re
         if not os.path.exists(LOG_FILE):
             return jsonify({"logs": [], "status": "success"})

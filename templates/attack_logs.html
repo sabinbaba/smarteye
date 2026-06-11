@@ -254,10 +254,25 @@ date/time.{% endblock %} {% block content %}
         const ts = l.timestamp || "--";
         const t = l.type || "UNKNOWN";
         const msg = (l.message || "").replace(/</g, "<").replace(/>/g, ">");
+        const isAttack =
+          (t || "").toUpperCase().includes("ATTACK") ||
+          (t || "").toUpperCase().includes("DOS") ||
+          (t || "").toUpperCase().includes("DDoS") ||
+          (t || "").toUpperCase().includes("ZERO_DAY") ||
+          (t || "").toUpperCase().includes("BRUTE") ||
+          (t || "").toUpperCase().includes("SCAN") ||
+          (t || "").toUpperCase().includes("FLOOD") ||
+          (t || "").toUpperCase().includes("INJECTION") ||
+          (t || "").toUpperCase().includes("XSS") ||
+          (t || "").toUpperCase().includes("SLOWLORIS") ||
+          (t || "").toUpperCase().includes("HEARTBLEED") ||
+          (t || "").toUpperCase().includes("C2") ||
+          (t || "").toUpperCase().includes("BOTNET");
+
         return `
         <tr>
           <td style="font-family: monospace;">${ts}</td>
-          <td style="font-weight:700;">${t}</td>
+          <td style="font-weight:700; box-shadow: ${isAttack ? "0 0 0 2px rgba(239, 68, 68, 0.35), 0 0 24px rgba(239, 68, 68, 0.25)" : "none"}; border-radius: 8px;">${t}</td>
           <td style="font-family: monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 900px;">${msg}</td>
         </tr>
       `;
