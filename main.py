@@ -3960,14 +3960,14 @@ SUSPICIOUS_PPS_FACTOR    = 0.40
 SUSPICIOUS_SUSTAIN_SEC   = 2.0   # must be above threshold this long
 
 # --- Zero-day / anomaly ------------------------------------------------------
-BASELINE_LEARNING_SECONDS = 180
-ANOMALY_Z_THRESHOLD       = 3.0
-ANOMALY_FEATURE_COUNT     = 2      # how many features must be anomalous
+# --- Zero-day / anomaly ------------------------------------------------------
+BASELINE_LEARNING_SECONDS = 240      # was 180
+ANOMALY_Z_THRESHOLD       = 3.5      # was 3.0
+ANOMALY_FEATURE_COUNT     = 2        # back to 2
 ZERO_DAY_COOLDOWN         = 60
-MIN_PACKETS_FOR_ANOMALY   = 30
+MIN_PACKETS_FOR_ANOMALY   = 30       # back to 30
 ANOMALY_MIN_STD_DEV       = 0.1
 BASELINE_MIN_SAMPLES      = 20
-
 # --- Global alert cooldown ---------------------------------------------------
 ATTACK_COOLDOWN_SEC = 15
 
@@ -3980,7 +3980,11 @@ WHITELISTED_IPS = {
     "192.168.1.254",
     "127.0.0.1",
     "172.20.10.1",
+    "197.243.125.49",
+    "172.20.10.2"
+    "197.243.125.50",
     "0.0.0.0",
+
 }
 WHITELIST_PRIVATE_RANGES = False
 
@@ -4617,9 +4621,12 @@ def check_brute_force(src, dport) -> bool:
         count = len(q)
     if count >= BRUTE_FORCE_THRESHOLD:
         service = BRUTE_FORCE_PORTS.get(dport, f"PORT-{dport}")
-        log_attack("BRUTE_FORCE",
-                   f"SRC={src} SERVICE={service} PORT={dport} ATTEMPTS={count} in {BRUTE_FORCE_WINDOW}s",
-                   src=src)
+        # Specify brute-force kind via monitored service name (e.g., FTP/SSH/etc.)
+        log_attack(
+            "BRUTE_FORCE",
+            f"SRC={src} BRUTE_FORCE_SERVICE={service} PORT={dport} ATTEMPTS={count} in {BRUTE_FORCE_WINDOW}s",
+            src=src,
+        )
         return True
     return False
 
@@ -5249,6 +5256,42 @@ def api_attack_logs():
                         "total": len(parsed), "status": "success"})
     except Exception as e:
         return jsonify({"logs": [], "total": 0, "status": "error", "error": str(e)})
+
+
+@flask_app.route("/api/blocked-ip-count")
+@auth.login_required
+def api_blocked_ip_count():
+    try:
+        return jsonify({"count": db.get_blocked_ip_count(), "status": "success"})
+    except Exception as e:
+        return jsonify({"count": 0, "status": "error", "error": str(e)}), 500
+
+
+@flask_app.route("/api/blocked-ips")
+@auth.login_required
+def api_blocked_ips():
+    try:
+        limit = request.args.get("limit", default=200, type=int)
+        return jsonify({"ips": db.get_blocked_ips(limit=limit), "status": "success"})
+    except Exception as e:
+        return jsonify({"ips": [], "status": "error", "error": str(e)}), 500
+
+
+@flask_app.route("/api/block-ip", methods=["POST"])
+@auth.admin_required
+def api_block_ip():
+    try:
+        payload = request.get_json(silent=True) or {}
+        ip = payload.get("ip_address") or payload.get("ip")
+        reason = payload.get("reason")
+        if not ip:
+            return jsonify({"success": False, "status": "error", "error": "ip_address is required"}), 400
+        ok = db.block_ip(ip_address=ip, reason=reason)
+        if not ok:
+            return jsonify({"success": False, "status": "error", "error": "failed to persist block"}), 500
+        return jsonify({"success": True, "status": "success"})
+    except Exception as e:
+        return jsonify({"success": False, "status": "error", "error": str(e)}), 500
 
 
 @flask_app.route("/api/attacks")

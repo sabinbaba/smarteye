@@ -72,9 +72,20 @@ class Database:
                 )
             ''')
 
+            # Blocked IPs (for attack mitigation UI)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS blocked_ips (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ip_address TEXT UNIQUE NOT NULL,
+                    reason TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+
             conn.commit()
 
     # User management methods
+
     def create_user(self, username, email, password, full_name=None, role='user'):
         """Create a new user"""
         try:
@@ -287,9 +298,61 @@ class Database:
             } for row in rows]
 
     # Statistics methods
+    def block_ip(self, ip_address: str, reason: str | None = None) -> bool:
+        """Persist a blocked IP in SQLite."""
+        if not ip_address:
+            return False
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    '''
+                    INSERT INTO blocked_ips (ip_address, reason)
+                    VALUES (?, ?)
+                    ON CONFLICT(ip_address) DO UPDATE SET
+                        reason = COALESCE(excluded.reason, blocked_ips.reason)
+                    ''' ,
+                    (ip_address, reason),
+                )
+                conn.commit()
+            return True
+        except Exception:
+            return False
+
+    def get_blocked_ips(self, limit: int = 200):
+        """Return blocked IPs newest first."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                SELECT ip_address, reason, created_at
+                FROM blocked_ips
+                ORDER BY created_at DESC
+                LIMIT ?
+                ''',
+                (limit,),
+            )
+            rows = cursor.fetchall()
+
+        return [
+            {
+                'ip_address': r[0],
+                'reason': r[1],
+                'created_at': r[2].isoformat(timespec='seconds') if hasattr(r[2], 'isoformat') else str(r[2]),
+            }
+            for r in rows
+        ]
+
+    def get_blocked_ip_count(self) -> int:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT COUNT(*) FROM blocked_ips')
+            return int(cursor.fetchone()[0])
+
     def get_user_stats(self):
         """Get user statistics"""
         with self.get_connection() as conn:
+
             cursor = conn.cursor()
 
             # Total users
